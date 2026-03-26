@@ -11,9 +11,8 @@
             box-sizing: border-box;
         }
         
-        /* Светлая тема */
         body.light {
-            --bg: #f5f7fa;
+            --bg: #f0f2f5;
             --card-bg: #ffffff;
             --text: #1a2c3e;
             --text-light: #6c86a3;
@@ -21,13 +20,10 @@
             --primary: #3b82f6;
             --primary-dark: #2563eb;
             --secondary: #8b5cf6;
-            --success: #10b981;
-            --danger: #ef4444;
             --message-in: #f1f5f9;
             --message-out: #3b82f6;
         }
         
-        /* Тёмная тема */
         body.dark {
             --bg: #0f172a;
             --card-bg: #1e293b;
@@ -35,7 +31,6 @@
             --text-light: #94a3b8;
             --border: #334155;
             --primary: #3b82f6;
-            --primary-dark: #60a5fa;
             --secondary: #a78bfa;
             --message-in: #334155;
             --message-out: #3b82f6;
@@ -87,15 +82,7 @@
             border-radius: 50%;
             width: 40px;
             height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.2s;
             color: white;
-        }
-        
-        .icon-btn:hover {
-            background: rgba(255,255,255,0.3);
         }
         
         .tabs {
@@ -113,7 +100,6 @@
             font-weight: 500;
             cursor: pointer;
             color: var(--text-light);
-            transition: all 0.2s;
         }
         
         .tab.active {
@@ -136,12 +122,7 @@
             border-radius: 16px;
             margin-bottom: 8px;
             cursor: pointer;
-            transition: background 0.2s;
             border: 1px solid var(--border);
-        }
-        
-        .chat-item:hover {
-            background: var(--bg);
         }
         
         .chat-avatar {
@@ -155,14 +136,6 @@
             font-size: 20px;
             font-weight: bold;
             color: white;
-            flex-shrink: 0;
-        }
-        
-        .chat-avatar img {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            object-fit: cover;
         }
         
         .chat-info {
@@ -172,18 +145,12 @@
         .chat-name {
             font-weight: 600;
             font-size: 16px;
-            margin-bottom: 4px;
             color: var(--text);
         }
         
         .chat-preview {
             font-size: 12px;
             color: var(--text-light);
-        }
-        
-        .lock-icon {
-            font-size: 12px;
-            margin-left: 4px;
         }
         
         .messages-container {
@@ -338,22 +305,6 @@
             border-bottom: 1px solid var(--border);
         }
         
-        .setting-item:last-child {
-            border-bottom: none;
-        }
-        
-        .setting-label {
-            color: var(--text);
-        }
-        
-        select, input[type="range"] {
-            padding: 8px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            background: var(--bg);
-            color: var(--text);
-        }
-        
         .profile-card {
             text-align: center;
             padding: 24px;
@@ -463,37 +414,6 @@
             padding: 8px;
         }
         
-        .modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.8);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 2000;
-        }
-        
-        .modal-content {
-            background: var(--card-bg);
-            padding: 24px;
-            border-radius: 24px;
-            width: 280px;
-            text-align: center;
-        }
-        
-        .modal-content input {
-            padding: 12px;
-            margin: 16px 0;
-            width: 100%;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            background: var(--bg);
-            color: var(--text);
-        }
-        
         .call-modal {
             position: fixed;
             top: 0;
@@ -505,12 +425,7 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            z-index: 3000;
-        }
-        
-        .call-modal h3 {
-            color: white;
-            margin-bottom: 30px;
+            z-index: 2000;
         }
         
         .call-modal button {
@@ -538,18 +453,18 @@
             color: white;
         }
         
-        .local-video, .remote-video {
-            width: 100%;
-            max-width: 300px;
-            border-radius: 16px;
-            margin: 10px;
-        }
-        
         .video-container {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
             gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        video {
+            width: 250px;
+            border-radius: 16px;
+            background: #000;
         }
     </style>
 </head>
@@ -569,16 +484,14 @@
         // WebRTC
         let peerConnection = null;
         let localStream = null;
-        let currentCallId = null;
         let currentCallWith = null;
-        let callActive = false;
+        let currentCallId = null;
         
-        // Настройки
-        let settings = {
-            fontSize: 14,
-            notifications: true,
-            theme: 'light',
-            enterToSend: true
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
         };
         
         function showToast(msg) {
@@ -590,185 +503,20 @@
         }
         
         function saveSettings() {
-            localStorage.setItem('messenger_settings', JSON.stringify(settings));
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'update_settings', settings }));
-            }
-            applySettings();
+            const theme = document.body.classList.contains('dark') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
         }
         
-        function applySettings() {
-            document.body.style.fontSize = settings.fontSize + 'px';
-            if (settings.theme === 'dark') {
-                document.body.classList.add('dark');
+        function toggleTheme() {
+            if (document.body.classList.contains('light')) {
                 document.body.classList.remove('light');
+                document.body.classList.add('dark');
             } else {
-                document.body.classList.add('light');
                 document.body.classList.remove('dark');
+                document.body.classList.add('light');
             }
-        }
-        
-        function loadSettings() {
-            const saved = localStorage.getItem('messenger_settings');
-            if (saved) {
-                settings = { ...settings, ...JSON.parse(saved) };
-            }
-            applySettings();
-        }
-        
-        // WebRTC функции
-        async function startCall(userId, video = false) {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
-                currentCallWith = userId;
-                currentCallId = Date.now().toString();
-                
-                peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-                
-                localStream.getTracks().forEach(track => {
-                    peerConnection.addTrack(track, localStream);
-                });
-                
-                peerConnection.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        ws.send(JSON.stringify({
-                            type: 'ice_candidate',
-                            to: userId,
-                            candidate: event.candidate,
-                            callId: currentCallId
-                        }));
-                    }
-                };
-                
-                peerConnection.ontrack = (event) => {
-                    const remoteVideo = document.getElementById('remoteVideo');
-                    if (remoteVideo && event.streams[0]) {
-                        remoteVideo.srcObject = event.streams[0];
-                    }
-                };
-                
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                
-                ws.send(JSON.stringify({
-                    type: 'call_offer',
-                    to: userId,
-                    offer: offer,
-                    callId: currentCallId
-                }));
-                
-                showCallUI(true, video);
-            } catch (err) {
-                console.error('Call error:', err);
-                showToast('Ошибка доступа к микрофону/камере');
-            }
-        }
-        
-        async function answerCall(from, offer, callId, video) {
-            currentCallWith = from;
-            currentCallId = callId;
-            
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
-                
-                peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-                
-                localStream.getTracks().forEach(track => {
-                    peerConnection.addTrack(track, localStream);
-                });
-                
-                peerConnection.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        ws.send(JSON.stringify({
-                            type: 'ice_candidate',
-                            to: from,
-                            candidate: event.candidate,
-                            callId: callId
-                        }));
-                    }
-                };
-                
-                peerConnection.ontrack = (event) => {
-                    const remoteVideo = document.getElementById('remoteVideo');
-                    if (remoteVideo && event.streams[0]) {
-                        remoteVideo.srcObject = event.streams[0];
-                    }
-                };
-                
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                
-                ws.send(JSON.stringify({
-                    type: 'call_answer',
-                    to: from,
-                    answer: answer,
-                    callId: callId
-                }));
-                
-                showCallUI(true, video);
-            } catch (err) {
-                console.error('Answer error:', err);
-            }
-        }
-        
-        async function handleAnswer(answer) {
-            if (peerConnection) {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            }
-        }
-        
-        async function handleIceCandidate(candidate) {
-            if (peerConnection) {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            }
-        }
-        
-        function endCall() {
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-                localStream = null;
-            }
-            if (peerConnection) {
-                peerConnection.close();
-                peerConnection = null;
-            }
-            if (currentCallWith) {
-                ws.send(JSON.stringify({ type: 'end_call', to: currentCallWith }));
-            }
-            callActive = false;
-            currentCallWith = null;
-            currentCallId = null;
-            document.getElementById('callModal')?.remove();
-            showToast('Звонок завершён');
-        }
-        
-        function showCallUI(isCaller, video) {
-            const modal = document.createElement('div');
-            modal.id = 'callModal';
-            modal.className = 'call-modal';
-            modal.innerHTML = `
-                <div class="video-container">
-                    <video id="localVideo" autoplay muted playsinline style="width:200px;border-radius:16px;"></video>
-                    <video id="remoteVideo" autoplay playsinline style="width:200px;border-radius:16px;"></video>
-                </div>
-                <button class="call-end" onclick="endCall()" style="margin-top:20px;">🔴 Завершить</button>
-            `;
-            document.body.appendChild(modal);
-            
-            const localVideo = document.getElementById('localVideo');
-            if (localVideo && localStream) {
-                localVideo.srcObject = localStream;
-            }
-        }
-        
-        function showIncomingCall(from, offer, callId) {
-            const video = confirm(`${from} звонит. Принять?`);
-            if (video) {
-                answerCall(from, offer, callId, false);
-            } else {
-                ws.send(JSON.stringify({ type: 'end_call', to: from }));
-            }
+            saveSettings();
+            render();
         }
         
         function render() {
@@ -781,7 +529,6 @@
                             <h2>💬 Мессенджер</h2>
                             <input type="text" id="loginName" placeholder="Ваше имя" autocomplete="off">
                             <button onclick="login()">Войти</button>
-                            <p style="font-size:12px; margin-top:12px; color:var(--text-light);">🔐 Работает через интернет</p>
                         </div>
                     </div>
                 `;
@@ -795,8 +542,8 @@
                     <div class="header">
                         <h1>💬 ${currentUser}</h1>
                         <div class="header-right">
+                            <button class="icon-btn" onclick="toggleTheme()">🌙</button>
                             <button class="icon-btn" onclick="setTab('settings')">⚙️</button>
-                            <button class="icon-btn" onclick="setTab('profile')">👤</button>
                         </div>
                     </div>
                     <div class="tabs">
@@ -809,7 +556,9 @@
                 </div>
             `;
             
-            if (currentTab === 'profile') renderProfile();
+            if (currentTab === 'chats' && currentChat) {
+                setTimeout(displayMessages, 50);
+            }
         }
         
         function renderChats() {
@@ -829,7 +578,7 @@
                         <div class="messages-area" id="messagesArea"></div>
                         <div class="input-panel">
                             <button class="icon-btn" onclick="attachImage()">📎</button>
-                            <input type="text" id="messageInput" placeholder="Сообщение..." ${settings.enterToSend ? 'onkeypress="if(event.key===\'Enter\') sendMessage()"' : ''}>
+                            <input type="text" id="messageInput" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') sendMessage()">
                             <button class="send-btn" onclick="sendMessage()">→</button>
                         </div>
                     </div>
@@ -837,10 +586,10 @@
             }
             
             const groupsHtml = groups.map(g => `
-                <div class="chat-item" onclick="openGroupChat('${g.id}', '${g.name}', ${g.hasPassword})">
+                <div class="chat-item" onclick="openGroupChat('${g.id}', '${g.name}')">
                     <div class="chat-avatar">#</div>
                     <div class="chat-info">
-                        <div class="chat-name">${g.name} ${g.hasPassword ? '🔒' : ''}</div>
+                        <div class="chat-name">${g.name}</div>
                         <div class="chat-preview">${g.members.length} участников</div>
                     </div>
                 </div>
@@ -856,7 +605,7 @@
             
             const privateHtml = Array.from(usersSet).map(user => `
                 <div class="chat-item" onclick="openPrivateChat('${user}')">
-                    <div class="chat-avatar">${getAvatarHtml(user)}</div>
+                    <div class="chat-avatar">${user.charAt(0).toUpperCase()}</div>
                     <div class="chat-info">
                         <div class="chat-name">${user}</div>
                         <div class="chat-preview">Личный чат</div>
@@ -870,7 +619,7 @@
                         <div class="chat-avatar">➕</div>
                         <div class="chat-info">
                             <div class="chat-name">Создать группу</div>
-                            <div class="chat-preview">С паролем или без</div>
+                            <div class="chat-preview">Новый чат с друзьями</div>
                         </div>
                     </div>
                 </div>
@@ -884,70 +633,20 @@
         function renderSettings() {
             return `
                 <div class="settings-section">
-                    <div class="settings-title">🔊 Уведомления</div>
-                    <div class="setting-item">
-                        <span class="setting-label">Звук и уведомления</span>
-                        <select onchange="setNotifications(this.value)">
-                            <option value="true" ${settings.notifications ? 'selected' : ''}>Включены</option>
-                            <option value="false" ${!settings.notifications ? 'selected' : ''}>Выключены</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="settings-section">
                     <div class="settings-title">🎨 Внешний вид</div>
                     <div class="setting-item">
                         <span class="setting-label">Тёмная тема</span>
-                        <select onchange="setTheme(this.value)">
-                            <option value="light" ${settings.theme === 'light' ? 'selected' : ''}>Светлая</option>
-                            <option value="dark" ${settings.theme === 'dark' ? 'selected' : ''}>Тёмная</option>
-                        </select>
-                    </div>
-                    <div class="setting-item">
-                        <span class="setting-label">Размер шрифта</span>
-                        <input type="range" min="12" max="20" value="${settings.fontSize}" onchange="setFontSize(this.value)">
-                    </div>
-                </div>
-                <div class="settings-section">
-                    <div class="settings-title">⌨️ Ввод</div>
-                    <div class="setting-item">
-                        <span class="setting-label">Отправка по Enter</span>
-                        <select onchange="setEnterToSend(this.value)">
-                            <option value="true" ${settings.enterToSend ? 'selected' : ''}>Включено</option>
-                            <option value="false" ${!settings.enterToSend ? 'selected' : ''}>Выключено</option>
-                        </select>
+                        <button class="icon-btn" onclick="toggleTheme()" style="background:var(--border);">${document.body.classList.contains('dark') ? '☀️' : '🌙'}</button>
                     </div>
                 </div>
                 <div class="settings-section">
                     <div class="settings-title">📞 Звонки</div>
                     <div class="setting-item">
-                        <span class="setting-label">Качество звука</span>
-                        <span class="setting-value">Высокое (WebRTC)</span>
+                        <span class="setting-label">WebRTC звонки</span>
+                        <span class="setting-label">✅ Работают</span>
                     </div>
                 </div>
             `;
-        }
-        
-        function renderProfile() {
-            const container = document.querySelector('.content');
-            if (container) {
-                container.innerHTML = `
-                    <div class="profile-card">
-                        <div class="profile-avatar" onclick="changeAvatar()">
-                            ${userAvatars[currentUser] ? `<img src="${userAvatars[currentUser]}" id="profileAvatar">` : currentUser.charAt(0).toUpperCase()}
-                        </div>
-                        <div class="profile-name">${currentUser}</div>
-                        <button class="icon-btn" style="background:var(--primary); margin-top:16px; width:auto; padding:10px 20px; border-radius:30px;" onclick="changeAvatar()">📸 Сменить аватар</button>
-                    </div>
-                `;
-            }
-        }
-        
-        function getAvatarHtml(user) {
-            const avatarUrl = userAvatars[user];
-            if (avatarUrl) {
-                return `<img src="${avatarUrl}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;">`;
-            }
-            return user.charAt(0).toUpperCase();
         }
         
         function displayMessages() {
@@ -968,7 +667,7 @@
                     <div class="message-bubble">
                         ${msg.from !== currentUser ? `
                             <div class="message-sender">
-                                ${getAvatarHtml(msg.from)} ${msg.from}
+                                ${msg.from}
                             </div>
                         ` : ''}
                         ${msg.text ? `<div class="message-text">${escapeHtml(msg.text)}</div>` : ''}
@@ -991,7 +690,6 @@
             currentTab = tab;
             if (tab !== 'chats') currentChat = null;
             render();
-            if (tab === 'chats' && currentChat) displayMessages();
         }
         
         function closeChat() {
@@ -1002,39 +700,17 @@
         function openPrivateChat(user) {
             currentChat = { type: 'private', user };
             render();
-            setTimeout(() => displayMessages(), 50);
         }
         
-        function openGroupChat(id, name, hasPassword) {
-            if (hasPassword) {
-                const password = prompt('Введите пароль группы:');
-                if (!password) return;
-                ws.send(JSON.stringify({ type: 'join_group', groupId: id, password }));
-                ws.onceJoin = (success) => {
-                    if (success) {
-                        currentChat = { type: 'group', id, name };
-                        render();
-                        displayMessages();
-                    }
-                };
-            } else {
-                ws.send(JSON.stringify({ type: 'join_group', groupId: id }));
-                currentChat = { type: 'group', id, name };
-                render();
-                setTimeout(() => displayMessages(), 50);
-            }
+        function openGroupChat(id, name) {
+            currentChat = { type: 'group', id, name };
+            render();
         }
         
         function showCreateGroupModal() {
             const name = prompt('Название группы:');
             if (!name) return;
-            const hasPassword = confirm('Добавить пароль?');
-            let password = null;
-            if (hasPassword) {
-                password = prompt('Введите пароль:');
-                if (!password) return;
-            }
-            ws.send(JSON.stringify({ type: 'create_group', groupName: name, password }));
+            ws.send(JSON.stringify({ type: 'create_group', groupName: name }));
             showToast('Группа создана!');
         }
         
@@ -1074,49 +750,180 @@
             input.click();
         }
         
-        async function changeAvatar() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.onchange = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const formData = new FormData();
-                formData.append('avatar', file);
-                formData.append('userId', currentUser);
-                const res = await fetch('/upload-avatar', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (data.avatar) {
-                    userAvatars[currentUser] = data.avatar;
-                    render();
-                    showToast('Аватарка обновлена!');
-                }
+        // WebRTC звонки
+        async function startCall(userId, video) {
+            if (!currentChat || currentChat.type !== 'private') {
+                showToast('Звонки доступны только в личных чатах');
+                return;
+            }
+            
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
+                currentCallWith = userId;
+                currentCallId = Date.now().toString();
+                
+                peerConnection = new RTCPeerConnection(configuration);
+                
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+                
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        ws.send(JSON.stringify({
+                            type: 'ice_candidate',
+                            to: userId,
+                            candidate: event.candidate,
+                            callId: currentCallId
+                        }));
+                    }
+                };
+                
+                peerConnection.ontrack = (event) => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo && event.streams[0]) {
+                        remoteVideo.srcObject = event.streams[0];
+                    }
+                };
+                
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                
+                ws.send(JSON.stringify({
+                    type: 'call_offer',
+                    to: userId,
+                    offer: offer,
+                    callId: currentCallId,
+                    video: video
+                }));
+                
+                showCallUI(true, video);
+            } catch (err) {
+                console.error('Call error:', err);
+                showToast('Ошибка доступа к микрофону/камере');
+            }
+        }
+        
+        async function answerCall(from, offer, callId, video) {
+            currentCallWith = from;
+            currentCallId = callId;
+            
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
+                
+                peerConnection = new RTCPeerConnection(configuration);
+                
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+                
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        ws.send(JSON.stringify({
+                            type: 'ice_candidate',
+                            to: from,
+                            candidate: event.candidate,
+                            callId: callId
+                        }));
+                    }
+                };
+                
+                peerConnection.ontrack = (event) => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo && event.streams[0]) {
+                        remoteVideo.srcObject = event.streams[0];
+                    }
+                };
+                
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                ws.send(JSON.stringify({
+                    type: 'call_answer',
+                    to: from,
+                    answer: answer,
+                    callId: callId
+                }));
+                
+                showCallUI(false, video);
+            } catch (err) {
+                console.error('Answer error:', err);
+                endCall();
+            }
+        }
+        
+        async function handleAnswer(answer) {
+            if (peerConnection && peerConnection.currentRemoteDescription === null) {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            }
+        }
+        
+        async function handleIceCandidate(candidate) {
+            if (peerConnection) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+        }
+        
+        function endCall() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (currentCallWith) {
+                ws.send(JSON.stringify({ type: 'end_call', to: currentCallWith }));
+            }
+            currentCallWith = null;
+            currentCallId = null;
+            document.getElementById('callModal')?.remove();
+            showToast('Звонок завершён');
+        }
+        
+        function showCallUI(isCaller, video) {
+            const modal = document.createElement('div');
+            modal.id = 'callModal';
+            modal.className = 'call-modal';
+            modal.innerHTML = `
+                <div class="video-container">
+                    <video id="localVideo" autoplay muted playsinline style="width:250px;border-radius:16px;background:#000;"></video>
+                    <video id="remoteVideo" autoplay playsinline style="width:250px;border-radius:16px;background:#000;"></video>
+                </div>
+                <button class="call-end" onclick="endCall()" style="width:70px;height:70px;border-radius:50%;font-size:30px;background:#ef4444;color:white;border:none;">🔴</button>
+            `;
+            document.body.appendChild(modal);
+            
+            const localVideo = document.getElementById('localVideo');
+            if (localVideo && localStream) {
+                localVideo.srcObject = localStream;
+            }
+        }
+        
+        function showIncomingCall(from, offer, callId, video) {
+            const modal = document.createElement('div');
+            modal.id = 'callModal';
+            modal.className = 'call-modal';
+            modal.innerHTML = `
+                <h2 style="color:white;">📞 ${from} звонит</h2>
+                <div style="display:flex; gap:20px; margin-top:20px;">
+                    <button class="call-accept" onclick="window._acceptCall()" style="width:70px;height:70px;border-radius:50%;font-size:30px;">✅</button>
+                    <button class="call-reject" onclick="window._rejectCall()" style="width:70px;height:70px;border-radius:50%;font-size:30px;">❌</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            window._acceptCall = () => {
+                modal.remove();
+                answerCall(from, offer, callId, video);
             };
-            input.click();
-        }
-        
-        // Настройки
-        function setFontSize(val) {
-            settings.fontSize = parseInt(val);
-            saveSettings();
-            render();
-        }
-        
-        function setTheme(val) {
-            settings.theme = val;
-            saveSettings();
-            render();
-        }
-        
-        function setEnterToSend(val) {
-            settings.enterToSend = val === 'true';
-            saveSettings();
-            render();
-        }
-        
-        function setNotifications(val) {
-            settings.notifications = val === 'true';
-            saveSettings();
+            window._rejectCall = () => {
+                modal.remove();
+                ws.send(JSON.stringify({ type: 'end_call', to: from }));
+                showToast('Звонок отклонён');
+            };
         }
         
         function login() {
@@ -1141,7 +948,6 @@
                 if (data.type === 'history') {
                     allMessages = data.messages;
                     render();
-                    if (currentChat) setTimeout(() => displayMessages(), 50);
                 }
                 else if (data.type === 'groups_list') {
                     groups = data.groups;
@@ -1155,18 +961,12 @@
                     allMessages.push(data);
                     render();
                     if (currentChat) displayMessages();
-                    if (settings.notifications && data.from !== currentUser) {
+                    if (data.from !== currentUser) {
                         showToast(`${data.from}: ${data.text || '📷'}`);
                     }
                 }
-                else if (data.type === 'join_error') {
-                    showToast(data.error);
-                }
-                else if (data.type === 'join_success') {
-                    showToast(`Вы присоединились к ${data.groupName}`);
-                }
                 else if (data.type === 'call_offer') {
-                    showIncomingCall(data.from, data.offer, data.callId);
+                    showIncomingCall(data.from, data.offer, data.callId, data.video);
                 }
                 else if (data.type === 'call_answer') {
                     handleAnswer(data.answer);
@@ -1181,7 +981,12 @@
             };
         }
         
-        loadSettings();
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'dark') {
+            document.body.classList.remove('light');
+            document.body.classList.add('dark');
+        }
+        
         const savedUser = localStorage.getItem('messenger_user');
         if (savedUser) {
             currentUser = savedUser;
@@ -1190,7 +995,6 @@
             render();
         }
         
-        // Глобальные функции
         window.setTab = setTab;
         window.closeChat = closeChat;
         window.openPrivateChat = openPrivateChat;
@@ -1198,15 +1002,10 @@
         window.showCreateGroupModal = showCreateGroupModal;
         window.sendMessage = sendMessage;
         window.attachImage = attachImage;
-        window.changeAvatar = changeAvatar;
-        window.setFontSize = setFontSize;
-        window.setTheme = setTheme;
-        window.setEnterToSend = setEnterToSend;
-        window.setNotifications = setNotifications;
         window.login = login;
         window.startCall = startCall;
         window.endCall = endCall;
-        window.showToast = showToast;
+        window.toggleTheme = toggleTheme;
     </script>
 </body>
 </html>
