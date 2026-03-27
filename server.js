@@ -14,7 +14,6 @@ let messages = [];
 const groups = new Map();
 const users = new Map();
 
-// Настройка загрузки файлов
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const uploadDir = path.join(__dirname, 'uploads');
@@ -40,13 +39,11 @@ app.use('/avatars', express.static('avatars'));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Загрузка файлов
 app.post('/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file' });
     res.json({ url: `/uploads/${req.file.filename}` });
 });
 
-// Загрузка аватарки
 app.post('/upload-avatar', upload.single('avatar'), (req, res) => {
     if (!req.file || !req.body.userId) return res.status(400).json({ error: 'Missing data' });
     const avatarUrl = `/avatars/${req.file.filename}`;
@@ -54,19 +51,48 @@ app.post('/upload-avatar', upload.single('avatar'), (req, res) => {
     res.json({ avatar: avatarUrl });
 });
 
-// Получить аватарку
-app.get('/avatar/:userId', (req, res) => {
-    const user = users.get(req.params.userId);
-    res.json({ avatar: user?.avatar || null });
-});
-
-// Общая группа
 groups.set('general', {
     name: 'Общий чат',
     members: [],
     messages: [],
-    password: null
+    password: null,
+    owner: null
 });
+
+function broadcastGroupsList() {
+    const groupsList = [];
+    for (const [groupId, group] of groups) {
+        groupsList.push({ 
+            id: groupId, 
+            name: group.name, 
+            members: group.members,
+            hasPassword: !!group.password,
+            owner: group.owner
+        });
+    }
+    for (const [userId, client] of clients) {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify({ type: 'groups_list', groups: groupsList }));
+        }
+    }
+}
+
+function broadcastContactsList() {
+    const contactsList = [];
+    for (const [userId, userData] of users) {
+        contactsList.push({
+            id: userId,
+            name: userId,
+            avatar: userData?.avatar || null,
+            online: clients.has(userId)
+        });
+    }
+    for (const [userId, client] of clients) {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify({ type: 'contacts_list', contacts: contactsList }));
+        }
+    }
+}
 
 wss.on('connection', (ws, req) => {
     let userId = null;
@@ -87,7 +113,6 @@ wss.on('connection', (ws, req) => {
                 generalGroup.members.push(userId);
             }
             
-            // Отправляем историю
             const userMessages = messages.filter(m => 
                 (m.to === userId || m.from === userId) && !m.isGroup
             );
@@ -109,16 +134,8 @@ wss.on('connection', (ws, req) => {
                 messages: [...userMessages, ...groupMessages].slice(-100)
             }));
             
-            const groupsList = [];
-            for (const [groupId, group] of groups) {
-                groupsList.push({ 
-                    id: groupId, 
-                    name: group.name, 
-                    members: group.members,
-                    hasPassword: !!group.password
-                });
-            }
-            ws.send(JSON.stringify({ type: 'groups_list', groups: groupsList }));
+            broadcastGroupsList();
+            broadcastContactsList();
             
             const avatarsList = {};
             for (const [uid, userData] of users) {
@@ -171,11 +188,10 @@ wss.on('connection', (ws, req) => {
                 name: msg.groupName,
                 members: [userId],
                 messages: [],
-                password: msg.password || null
+                password: msg.password || null,
+                owner: userId
             });
             ws.send(JSON.stringify({ type: 'group_created', groupId, groupName: msg.groupName }));
-            
-            // Обновляем списки у всех
             broadcastGroupsList();
         }
         else if (msg.type === 'join_group') {
@@ -194,11 +210,62 @@ wss.on('connection', (ws, req) => {
                 broadcastGroupsList();
             }
         }
-        else if (msg.type === 'update_settings') {
-            const userData = clients.get(userId);
-            if (userData) {
-                userData.settings = { ...userData.settings, ...msg.settings };
-                users.set(userId, { ...users.get(userId), settings: userData.settings });
+        else if (msg.type === 'delete_group') {
+            const group = groups.get(msg.groupId);
+            if (group && group.owner === userId) {
+                groups.delete(msg.groupId);
+                broadcastGroupsList();
+                ws.send(JSON.stringify({ type: 'group_deleted', groupId: msg.groupId }));
+            } else {
+                ws.send(JSON.stringify({ type: 'delete_error', error: 'Только создатель может удалить группу' }));
+            }
+        }
+        else if (msg.type === 'leave_group') {
+            const group = groups.get(msg.groupId);
+            if (group) {
+                const index = group.members.indexOf(userId);
+                if (index !== -1) group.members.splice(index, 1);
+                broadcastGroupsList();
+            }
+        }
+        else if (msg.type === 'call_offer') {
+            const target = clients.get(msg.to);
+            if (target?.ws.readyState === WebSocket.OPEN) {
+                target.ws.send(JSON.stringify({
+                    type: 'call_offer',
+                    from: userId,
+                    offer: msg.offer,
+                    callId: msg.callId,
+                    video: msg.video
+                }));
+            }
+        }
+        else if (msg.type === 'call_answer') {
+            const target = clients.get(msg.to);
+            if (target?.ws.readyState === WebSocket.OPEN) {
+                target.ws.send(JSON.stringify({
+                    type: 'call_answer',
+                    from: userId,
+                    answer: msg.answer,
+                    callId: msg.callId
+                }));
+            }
+        }
+        else if (msg.type === 'ice_candidate') {
+            const target = clients.get(msg.to);
+            if (target?.ws.readyState === WebSocket.OPEN) {
+                target.ws.send(JSON.stringify({
+                    type: 'ice_candidate',
+                    from: userId,
+                    candidate: msg.candidate,
+                    callId: msg.callId
+                }));
+            }
+        }
+        else if (msg.type === 'end_call') {
+            const target = clients.get(msg.to);
+            if (target?.ws.readyState === WebSocket.OPEN) {
+                target.ws.send(JSON.stringify({ type: 'end_call', from: userId }));
             }
         }
     });
@@ -211,31 +278,12 @@ wss.on('connection', (ws, req) => {
             }
             clients.delete(userId);
             broadcastGroupsList();
+            broadcastContactsList();
         }
     });
 });
 
-function broadcastGroupsList() {
-    const groupsList = [];
-    for (const [groupId, group] of groups) {
-        groupsList.push({ 
-            id: groupId, 
-            name: group.name, 
-            members: group.members,
-            hasPassword: !!group.password
-        });
-    }
-    for (const [userId, client] of clients) {
-        if (client.ws.readyState === WebSocket.OPEN) {
-            client.ws.send(JSON.stringify({ type: 'groups_list', groups: groupsList }));
-        }
-    }
-}
-
 const PORT = process.env.PORT || 3000;
-
-// ВАЖНО: '0.0.0.0' - чтобы сервер был доступен извне
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер запущен: http://localhost:${PORT}`);
-    console.log(`📱 Для доступа из интернета используйте туннель: ssh -R 80:localhost:3000 localhost.run`);
 });
