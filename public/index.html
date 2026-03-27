@@ -61,7 +61,17 @@ body {
         .reaction-picker span { font-size: 24px; cursor: pointer; padding: 4px; transition: transform 0.1s; }
         .reaction-picker span:hover { transform: scale(1.2); }
         .input-panel { padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: var(--card-bg); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; flex-shrink: 0; margin-top: auto; position: sticky; bottom: 0; z-index: 10; width: 100%; box-sizing: border-box; }
-        .input-panel input { flex: 1; padding: 12px 18px; border: 1px solid var(--border); border-radius: 30px; font-size: 15px; background: var(--bg); color: var(--text); }
+        .input-panel input {
+    flex: 1;
+    min-width: 40px;
+    width: calc(100% - 120px);
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 30px;
+    font-size: 15px;
+    background: var(--bg);
+    color: var(--text);
+}
         .send-btn { background: var(--primary); border: none; padding: 12px 24px; border-radius: 30px; color: white; font-weight: 600; cursor: pointer; }
         .action-btn { background: var(--border); border: none; font-size: 20px; cursor: pointer; padding: 8px; border-radius: 50%; width: 42px; height: 42px; }
         .settings-section { background: var(--card-bg); border-radius: 24px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); }
