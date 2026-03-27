@@ -18,6 +18,7 @@
             --message-in: #f1f5f9;
             --message-out: #6366f1;
             --danger: #ef4444;
+            --success: #10b981;
         }
         
         body.dark {
@@ -31,6 +32,7 @@
             --message-in: #334155;
             --message-out: #818cf8;
             --danger: #ef4444;
+            --success: #10b981;
         }
         
         body {
@@ -400,16 +402,16 @@
                         <div class="header-right">
                             <span class="user-name">${currentUser}</span>
                             <button class="icon-btn" onclick="toggleTheme()">${document.body.classList.contains('dark') ? '☀️' : '🌙'}</button>
-                            <button class="icon-btn" onclick="setTab('settings')">⚙️</button>
                         </div>
                     </div>
                     <div class="tabs">
                         <div class="tab ${currentTab === 'chats' ? 'active' : ''}" onclick="setTab('chats')">💬 Чаты</div>
                         <div class="tab ${currentTab === 'contacts' ? 'active' : ''}" onclick="setTab('contacts')">👥 Контакты</div>
                         <div class="tab ${currentTab === 'calls' ? 'active' : ''}" onclick="setTab('calls')">📞 Звонки</div>
+                        <div class="tab ${currentTab === 'settings' ? 'active' : ''}" onclick="setTab('settings')">⚙️ Настройки</div>
                     </div>
                     <div class="content">
-                        ${currentTab === 'chats' ? renderChats() : currentTab === 'contacts' ? renderContacts() : renderCalls()}
+                        ${currentTab === 'chats' ? renderChats() : currentTab === 'contacts' ? renderContacts() : currentTab === 'calls' ? renderCalls() : renderSettings()}
                     </div>
                 </div>
             `;
@@ -507,10 +509,17 @@
         }
         
         function renderContacts() {
-            const onlineContacts = contacts.filter(c => c.online);
+            const onlineContacts = contacts.filter(c => c.online && c.name !== currentUser);
             const offlineContacts = contacts.filter(c => !c.online && c.name !== currentUser);
             
             return `
+                <div class="settings-section">
+                    <div class="settings-title">➕ Добавить контакт</div>
+                    <div class="add-contact" style="display:flex; gap:8px; margin-bottom:16px;">
+                        <input type="text" id="contactName" placeholder="Имя пользователя" style="flex:1; padding:12px; border:1px solid var(--border); border-radius:30px; background:var(--bg);">
+                        <button class="send-btn" onclick="addContact()">Добавить</button>
+                    </div>
+                </div>
                 <div class="settings-section">
                     <div class="settings-title">🟢 Онлайн (${onlineContacts.length})</div>
                     ${onlineContacts.map(c => `
@@ -569,6 +578,38 @@
             `;
         }
         
+        function renderSettings() {
+            return `
+                <div class="settings-section">
+                    <div class="settings-title">👤 Аккаунт</div>
+                    <div class="setting-item">
+                        <span class="setting-label">Ваше имя</span>
+                        <span class="setting-label" style="color:var(--primary);">${currentUser}</span>
+                    </div>
+                    <div class="setting-item">
+                        <button class="send-btn" style="background:var(--primary); width:100%;" onclick="renameAccount()">✏️ Переименовать</button>
+                    </div>
+                    <div class="setting-item">
+                        <button class="send-btn" style="background:var(--danger); width:100%;" onclick="deleteAccount()">🗑️ Удалить аккаунт</button>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-title">🎨 Внешний вид</div>
+                    <div class="setting-item">
+                        <span class="setting-label">Тёмная тема</span>
+                        <button class="icon-btn" onclick="toggleTheme()" style="background:var(--border);">${document.body.classList.contains('dark') ? '☀️' : '🌙'}</button>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-title">ℹ️ О приложении</div>
+                    <div class="setting-item">
+                        <span class="setting-label">Версия</span>
+                        <span class="setting-label">2.0</span>
+                    </div>
+                </div>
+            `;
+        }
+        
         function displayMessages() {
             const container = document.getElementById('messagesArea');
             if (!container) return;
@@ -603,6 +644,15 @@
         function openPrivateChat(user) { currentChat = { type: 'private', user }; render(); }
         function openGroupChat(id, name) { currentChat = { type: 'group', id, name }; render(); }
         
+        function addContact() {
+            const contactName = document.getElementById('contactName')?.value.trim();
+            if (!contactName) { showToast('Введите имя контакта'); return; }
+            if (contactName === currentUser) { showToast('Нельзя добавить самого себя'); return; }
+            ws.send(JSON.stringify({ type: 'add_contact', contactName }));
+            document.getElementById('contactName').value = '';
+            showToast(`Заявка отправлена ${contactName}`);
+        }
+        
         function showCreateGroupModal() {
             const name = prompt('Название группы:');
             if (!name) return;
@@ -625,6 +675,41 @@
         function leaveGroup(groupId) {
             if (confirm('Покинуть группу?')) {
                 ws.send(JSON.stringify({ type: 'leave_group', groupId }));
+            }
+        }
+        
+        function renameAccount() {
+            const newName = prompt('Введите новое имя:', currentUser);
+            if (!newName) return;
+            
+            const badWords = ['далбаеб', 'далбаёб', 'хуй', 'пизда', 'бля', 'ебать', 'сука', 'пидор', 'мудак', 'лох', 'уебан', 'долбоеб', 'дебил', 'даун'];
+            if (badWords.some(word => newName.toLowerCase().includes(word))) {
+                showToast('❌ Выберите нормальное имя!');
+                return;
+            }
+            
+            currentUser = newName;
+            localStorage.setItem('messenger_user', newName);
+            if (ws) ws.close();
+            connectWebSocket();
+            showToast(`✅ Имя изменено на ${newName}`);
+        }
+        
+        function deleteAccount() {
+            if (confirm('⚠️ ВНИМАНИЕ! Удалить аккаунт? Все сообщения будут стёрты.')) {
+                if (confirm('Точно удалить?')) {
+                    localStorage.removeItem('messenger_user');
+                    localStorage.removeItem('theme');
+                    if (ws) ws.close();
+                    fetch('/clear-user-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: currentUser })
+                    }).catch(e => console.log('Очистка'));
+                    currentUser = '';
+                    render();
+                    showToast('🗑️ Аккаунт удалён');
+                }
             }
         }
         
@@ -672,7 +757,6 @@
             input.click();
         }
         
-        // WebRTC звонки
         async function startCall(userId, video) {
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
@@ -700,7 +784,6 @@
                 
                 showCallUI(true, video);
                 
-                // Сохраняем в историю
                 const recentCalls = JSON.parse(localStorage.getItem('recentCalls') || '[]');
                 recentCalls.unshift({ with: userId, type: video ? 'Видеозвонок' : 'Голосовой', time: new Date().toLocaleString(), video: video });
                 localStorage.setItem('recentCalls', JSON.stringify(recentCalls.slice(0, 20)));
@@ -794,37 +877,35 @@
             window._rejectCall = () => { modal.remove(); ws.send(JSON.stringify({ type: 'end_call', to: from })); showToast('Звонок отклонён'); };
         }
         
-function login() {
-    const name = document.getElementById('loginName').value.trim();
-    
-    // Список запрещённых слов (маты и оскорбления)
-    const badWords = [
-        'далбаеб', 'далбаёб', 'далбайоб', 'далбайоп', 'далбоеб',
-        'хуй', 'хуи', 'хуе', 'хую', 'хуя', 'пизда', 'пиздец', 'пизде',
-        'бля', 'блять', 'блядь', 'ебать', 'ебаный', 'ебанат',
-        'говно', 'гнида', 'сука', 'сучка', 'пидор', 'пидорас',
-        'мудак', 'мразь', 'лох', 'лошара', 'чмо', 'шлюха',
-        'уебан', 'уебок', 'уебище', 'залупа', 'хуесос',
-        'долбоеб', 'долбаеб', 'дебил', 'даун', 'идиот',
-        'кретин', 'олень', 'баран', 'овца', 'козел'
-    ];
-    
-    // Проверка на маты
-    if (badWords.some(word => name.toLowerCase().includes(word))) {
-        showToast('❌ Выберите нормальное имя!');
-        document.getElementById('loginName').value = '';
-        return;
-    }
-    
-    if (!name) {
-        showToast('Введите имя');
-        return;
-    }
-    
-    currentUser = name;
-    localStorage.setItem('messenger_user', name);
-    connectWebSocket();
-}
+        function login() {
+            const name = document.getElementById('loginName').value.trim();
+            
+            const badWords = [
+                'далбаеб', 'далбаёб', 'далбайоб', 'далбайоп', 'далбоеб',
+                'хуй', 'хуи', 'хуе', 'хую', 'хуя', 'пизда', 'пиздец', 'пизде',
+                'бля', 'блять', 'блядь', 'ебать', 'ебаный', 'ебанат',
+                'говно', 'гнида', 'сука', 'сучка', 'пидор', 'пидорас',
+                'мудак', 'мразь', 'лох', 'лошара', 'чмо', 'шлюха',
+                'уебан', 'уебок', 'уебище', 'залупа', 'хуесос',
+                'долбоеб', 'долбаеб', 'дебил', 'даун', 'идиот',
+                'кретин', 'олень', 'баран', 'овца', 'козел'
+            ];
+            
+            if (badWords.some(word => name.toLowerCase().includes(word))) {
+                showToast('❌ Выберите нормальное имя!');
+                document.getElementById('loginName').value = '';
+                return;
+            }
+            
+            if (!name) {
+                showToast('Введите имя');
+                return;
+            }
+            
+            currentUser = name;
+            localStorage.setItem('messenger_user', name);
+            connectWebSocket();
+        }
         
         function connectWebSocket() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -848,6 +929,13 @@ function login() {
                 else if (data.type === 'join_success') { showToast(`Вы присоединились к ${data.groupName}`); }
                 else if (data.type === 'group_deleted') { showToast('Группа удалена'); if (currentChat?.id === data.groupId) closeChat(); }
                 else if (data.type === 'delete_error') { showToast(data.error); }
+                else if (data.type === 'add_contact_error') { showToast(data.error); }
+                else if (data.type === 'contact_request_sent') { showToast(`Заявка отправлена ${data.to}`); }
+                else if (data.type === 'contact_request') { 
+                    showToast(`${data.from} хочет добавить вас в друзья`);
+                    if (currentTab === 'contacts') render();
+                }
+                else if (data.type === 'contact_accepted') { showToast(`${data.contact} теперь ваш друг!`); }
                 else if (data.type === 'call_offer') { showIncomingCall(data.from, data.offer, data.callId, data.video); }
                 else if (data.type === 'call_answer') { handleAnswer(data.answer); }
                 else if (data.type === 'ice_candidate') { handleIceCandidate(data.candidate); }
@@ -866,7 +954,8 @@ function login() {
         window.deleteGroup = deleteGroup; window.leaveGroup = leaveGroup; window.sendMessage = sendMessage;
         window.attachImage = attachImage; window.login = login; window.toggleTheme = toggleTheme;
         window.toggleStickers = toggleStickers; window.sendSticker = sendSticker; window.startCall = startCall;
-        window.startCallFromSelect = startCallFromSelect; window.endCall = endCall;
+        window.startCallFromSelect = startCallFromSelect; window.endCall = endCall; window.addContact = addContact;
+        window.renameAccount = renameAccount; window.deleteAccount = deleteAccount;
     </script>
 </body>
 </html>
