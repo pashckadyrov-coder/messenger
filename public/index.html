@@ -569,23 +569,26 @@ async function startCall(userId, video) {
     if (!userId) { showToast('❌ Выберите контакт'); return; }
     
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true,
+        const mediaConstraints = { 
+            audio: true,  // ВСЕГДА ВКЛЮЧАЕМ АУДИО
             video: video ? { width: 640, height: 480 } : false 
-        });
+        };
+        
+        localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        console.log('🎥 startCall: получили поток, треки:', localStream.getTracks().map(t => t.kind));
         
         currentCallWith = userId;
         currentCallId = Date.now().toString();
         
         peerConnection = new RTCPeerConnection(configuration);
         
-        // Добавляем все треки
+        // Добавляем ВСЕ треки из локального потока
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
-            console.log('📤 Отправляем трек:', track.kind);
+            console.log('📤 startCall: добавляем трек', track.kind);
         });
         
-        // Отправляем ICE кандидаты
+        // Обработка ICE кандидатов
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 ws.send(JSON.stringify({ 
@@ -594,42 +597,46 @@ async function startCall(userId, video) {
                     candidate: event.candidate, 
                     callId: currentCallId 
                 }));
+                console.log('🔵 startCall: отправил ICE кандидат');
             }
         };
         
-        // Получаем удалённые треки
+        // Получаем удалённый поток (от отвечающего)
         peerConnection.ontrack = (event) => {
-            console.log('📥 Получен трек:', event.track.kind);
+            console.log('📥 startCall: получен удалённый трек', event.track.kind, 'streams:', event.streams.length);
+            
             if (event.streams[0]) {
                 if (event.track.kind === 'video') {
                     const remoteVideo = document.getElementById('remoteVideo');
                     if (remoteVideo) {
                         remoteVideo.srcObject = event.streams[0];
                         remoteVideo.play().catch(e => console.log(e));
+                        console.log('🎥 startCall: видео собеседника подключено');
                     }
                 } else if (event.track.kind === 'audio') {
-                    // Для аудио — используем любой элемент или создаём
+                    // Воспроизводим аудио собеседника
                     const remoteAudio = document.getElementById('remoteAudio');
                     if (remoteAudio) {
                         remoteAudio.srcObject = event.streams[0];
                         remoteAudio.play().catch(e => console.log(e));
+                        console.log('🔊 startCall: аудио собеседника подключено');
                     } else {
-                        // Если нет элемента, создаём временный
                         const audio = new Audio();
                         audio.srcObject = event.streams[0];
                         audio.play().catch(e => console.log(e));
-                        console.log('🎵 Создан временный аудиоэлемент');
+                        console.log('🔊 startCall: создан временный аудиоэлемент');
                     }
                 }
             }
         };
         
-        // Создаём offer с приёмом аудио и видео
+        // Создаём offer
         const offer = await peerConnection.createOffer({
             offerToReceiveAudio: true,
-            offerToReceiveVideo: video
+            offerToReceiveVideo: true  // ВСЕГДА true, даже если video=false, но для видео нужно
         });
         await peerConnection.setLocalDescription(offer);
+        console.log('📞 startCall: offer создан');
         
         // Отправляем offer
         ws.send(JSON.stringify({ 
@@ -645,7 +652,7 @@ async function startCall(userId, video) {
         
     } catch (err) {
         showToast('❌ Нет доступа к камере/микрофону');
-        console.error(err);
+        console.error('❌ startCall ошибка:', err);
     }
 }
 
@@ -654,21 +661,23 @@ async function answerCall(from, offer, callId, video) {
     currentCallId = callId;
     
     try {
-        // ВАЖНО: запрашиваем аудио ВСЕГДА
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true,  // <- ОБЯЗАТЕЛЬНО!
+        const mediaConstraints = { 
+            audio: true,  // ВСЕГДА ВКЛЮЧАЕМ АУДИО
             video: video ? { width: 640, height: 480 } : false 
-        });
+        };
+        
+        localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        console.log('🎥 answerCall: получили поток, треки:', localStream.getTracks().map(t => t.kind));
         
         peerConnection = new RTCPeerConnection(configuration);
         
-        // Добавляем свои треки
+        // Добавляем ВСЕ треки
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
-            console.log('📤 Отправляем трек (answer):', track.kind);
+            console.log('📤 answerCall: добавляем трек', track.kind);
         });
         
-        // Отправляем ICE кандидаты
+        // ICE кандидаты
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 ws.send(JSON.stringify({ 
@@ -677,31 +686,33 @@ async function answerCall(from, offer, callId, video) {
                     candidate: event.candidate, 
                     callId: callId 
                 }));
+                console.log('🔵 answerCall: отправил ICE кандидат');
             }
         };
         
-        // Получаем удалённые треки (звук собеседника)
+        // Получаем удалённый поток (от звонящего)
         peerConnection.ontrack = (event) => {
-            console.log('📥 Получен трек (answer):', event.track.kind);
+            console.log('📥 answerCall: получен удалённый трек', event.track.kind, 'streams:', event.streams.length);
+            
             if (event.streams[0]) {
                 if (event.track.kind === 'video') {
                     const remoteVideo = document.getElementById('remoteVideo');
                     if (remoteVideo) {
                         remoteVideo.srcObject = event.streams[0];
                         remoteVideo.play().catch(e => console.log(e));
+                        console.log('🎥 answerCall: видео звонящего подключено');
                     }
                 } else if (event.track.kind === 'audio') {
-                    // ВОТ ЗДЕСЬ — ВОСПРОИЗВОДИМ АУДИО
                     const remoteAudio = document.getElementById('remoteAudio');
                     if (remoteAudio) {
                         remoteAudio.srcObject = event.streams[0];
                         remoteAudio.play().catch(e => console.log(e));
-                        console.log('🎵 Аудио подключено к remoteAudio');
+                        console.log('🔊 answerCall: аудио звонящего подключено');
                     } else {
                         const audio = new Audio();
                         audio.srcObject = event.streams[0];
                         audio.play().catch(e => console.log(e));
-                        console.log('🎵 Создан временный аудиоэлемент');
+                        console.log('🔊 answerCall: создан временный аудиоэлемент');
                     }
                 }
             }
@@ -709,13 +720,15 @@ async function answerCall(from, offer, callId, video) {
         
         // Устанавливаем удалённое описание (offer от звонящего)
         await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        console.log('✅ answerCall: remote description установлен');
         
-        // Создаём ответ — ВАЖНО: запрашиваем приём аудио!
+        // Создаём ответ — ВАЖНО: запрашиваем приём и аудио, и видео
         const answer = await peerConnection.createAnswer({
-            offerToReceiveAudio: true,   // <- ОБЯЗАТЕЛЬНО!
-            offerToReceiveVideo: video
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true  // ВСЕГДА true
         });
         await peerConnection.setLocalDescription(answer);
+        console.log('✅ answerCall: answer создан');
         
         // Отправляем ответ
         ws.send(JSON.stringify({ 
@@ -726,10 +739,10 @@ async function answerCall(from, offer, callId, video) {
         }));
         
         showCallUI(video, false);
-        console.log('✅ Ответ отправлен, ожидаем аудио от', from);
+        console.log('✅ answerCall: ответ отправлен');
         
     } catch (err) {
-        console.error('Ошибка в answerCall:', err);
+        console.error('❌ answerCall ошибка:', err);
         endCall();
     }
 }
@@ -738,9 +751,9 @@ async function handleAnswer(answer) {
     if (peerConnection && peerConnection.currentRemoteDescription === null) {
         try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            console.log('✅ Remote description установлен');
+            console.log('✅ handleAnswer: remote description установлен');
         } catch (err) {
-            console.error('Ошибка установки remote description:', err);
+            console.error('❌ handleAnswer ошибка:', err);
         }
     }
 }
@@ -751,7 +764,7 @@ async function handleIceCandidate(candidate) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
             console.log('✅ ICE кандидат добавлен');
         } catch (err) {
-            console.error('Ошибка ICE:', err);
+            console.error('❌ ICE ошибка:', err);
         }
     }
 }
@@ -781,9 +794,16 @@ function showCallUI(video, isCaller) {
     if (video) {
         modal.innerHTML = `
             <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;margin-bottom:20px;">
-                <video id="localVideo" autoplay muted playsinline style="width:300px;border-radius:20px;background:#000;transform:scaleX(-1);"></video>
-                <video id="remoteVideo" autoplay playsinline style="width:300px;border-radius:20px;background:#000;"></video>
+                <div>
+                    <div style="color:white;text-align:center;margin-bottom:5px;">Вы</div>
+                    <video id="localVideo" autoplay muted playsinline style="width:300px;border-radius:20px;background:#000;transform:scaleX(-1);"></video>
+                </div>
+                <div>
+                    <div style="color:white;text-align:center;margin-bottom:5px;">Собеседник</div>
+                    <video id="remoteVideo" autoplay playsinline style="width:300px;border-radius:20px;background:#000;"></video>
+                </div>
             </div>
+            <audio id="remoteAudio" autoplay style="display:none;"></audio>
             <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
         `;
     } else {
@@ -803,9 +823,35 @@ function showCallUI(video, isCaller) {
     if (localVideo && localStream) {
         localVideo.srcObject = localStream;
         localVideo.play().catch(e => console.log(e));
+        console.log('🎥 showCallUI: локальное видео подключено');
     }
 }
 
+function showIncomingCall(from, offer, callId, video) {
+    const modal = document.createElement('div');
+    modal.id = 'callModal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:3000;';
+    
+    modal.innerHTML = `
+        <h2 style="color:white;margin-bottom:20px;">📞 ${from} ${video ? 'видеозвонит' : 'звонит'}</h2>
+        <div style="display:flex;gap:20px;">
+            <button onclick="window._acceptCall()" style="background:#10b981;border:none;width:70px;height:70px;border-radius:50%;font-size:30px;cursor:pointer;">✅</button>
+            <button onclick="window._rejectCall()" style="background:#ef4444;border:none;width:70px;height:70px;border-radius:50%;font-size:30px;cursor:pointer;">❌</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    window._acceptCall = () => { 
+        modal.remove(); 
+        answerCall(from, offer, callId, video); 
+    };
+    
+    window._rejectCall = () => { 
+        modal.remove(); 
+        ws.send(JSON.stringify({ type: 'end_call', to: from })); 
+        showToast('📞 Звонок отклонён'); 
+    };
+}
 function showIncomingCall(from, offer, callId, video) {
     const modal = document.createElement('div');
     modal.id = 'callModal';
