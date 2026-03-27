@@ -568,9 +568,8 @@ async function startCall(userId, video) {
     if (!userId) { showToast('❌ Выберите контакт'); return; }
     
     try {
-        // Запрашиваем медиа — ВАЖНО: аудио всегда true
         localStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true,  // <- АУДИО ВСЕГДА ВКЛЮЧЕНО
+            audio: true,
             video: video ? { width: 640, height: 480 } : false 
         });
         
@@ -579,13 +578,11 @@ async function startCall(userId, video) {
         
         peerConnection = new RTCPeerConnection(configuration);
         
-        // Добавляем ВСЕ треки (и аудио, и видео)
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
-            console.log('Добавлен трек:', track.kind); // Должно показать 'audio' и 'video'
+            console.log('Добавлен трек:', track.kind);
         });
         
-        // Отправляем ICE кандидаты
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 ws.send(JSON.stringify({ 
@@ -597,27 +594,35 @@ async function startCall(userId, video) {
             }
         };
         
-        // Получаем удалённый поток
         peerConnection.ontrack = (event) => {
-            console.log('Получен трек:', event.track.kind); // Должно показать 'audio' и 'video'
+            console.log('Получен трек:', event.track.kind);
             if (event.streams[0]) {
-                const remoteVideo = document.getElementById('remoteVideo');
-                if (remoteVideo && event.track.kind === 'video') {
-                    remoteVideo.srcObject = event.streams[0];
-                    remoteVideo.play().catch(e => console.log(e));
+                if (event.track.kind === 'video') {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        remoteVideo.srcObject = event.streams[0];
+                        remoteVideo.play().catch(e => console.log(e));
+                    }
+                } else if (event.track.kind === 'audio') {
+                    const remoteAudio = document.getElementById('remoteAudio');
+                    if (remoteAudio) {
+                        remoteAudio.srcObject = event.streams[0];
+                        remoteAudio.play().catch(e => console.log(e));
+                    } else {
+                        const audio = new Audio();
+                        audio.srcObject = event.streams[0];
+                        audio.play().catch(e => console.log(e));
+                    }
                 }
-                // Для аудио — просто добавляем в поток, звук пойдёт автоматически
             }
         };
         
-        // Создаём offer
         const offer = await peerConnection.createOffer({
-            offerToReceiveAudio: true,   // <- ВАЖНО: принимать аудио
-            offerToReceiveVideo: video   // принимать видео если нужно
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: video
         });
         await peerConnection.setLocalDescription(offer);
         
-        // Отправляем offer
         ws.send(JSON.stringify({ 
             type: 'call_offer', 
             to: userId, 
@@ -728,13 +733,25 @@ async function handleAnswer(answer) {
     modal.className = 'call-modal';
     modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:3000;';
     
-    modal.innerHTML = `
-        <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;margin-bottom:20px;">
-            <video id="localVideo" autoplay muted playsinline style="width:300px;border-radius:20px;background:#000;transform:scaleX(-1);"></video>
-            ${video ? '<video id="remoteVideo" autoplay playsinline style="width:300px;border-radius:20px;background:#000;"></video>' : '<div style="width:300px;height:225px;background:#333;border-radius:20px;display:flex;align-items:center;justify-content:center;color:white;">🎤 Аудиозвонок</div>'}
-        </div>
-        <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
-    `;
+    if (video) {
+        modal.innerHTML = `
+            <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;margin-bottom:20px;">
+                <video id="localVideo" autoplay muted playsinline style="width:300px;border-radius:20px;background:#000;transform:scaleX(-1);"></video>
+                <video id="remoteVideo" autoplay playsinline style="width:300px;border-radius:20px;background:#000;"></video>
+            </div>
+            <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
+        `;
+    } else {
+        // Аудиозвонок — добавляем скрытый аудиоэлемент
+        modal.innerHTML = `
+            <div style="text-align:center;margin-bottom:20px;">
+                <div style="font-size:80px;margin-bottom:20px;">🎤</div>
+                <h2 style="color:white;">Аудиозвонок</h2>
+                <audio id="remoteAudio" autoplay style="display:none;"></audio>
+            </div>
+            <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
+        `;
+    }
     document.body.appendChild(modal);
     
     const localVideo = document.getElementById('localVideo');
