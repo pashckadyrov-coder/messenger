@@ -39,8 +39,6 @@
         .chat-name { font-weight: 600; font-size: 16px; color: var(--text); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .chat-preview { font-size: 12px; color: var(--text-light); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .online-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; }
-        .offline-dot { background: var(--offline); }
-        .pin-icon { color: var(--warning); font-size: 14px; }
         .messages-container { display: flex; flex-direction: column; height: 100%; }
         .messages-header { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
         .messages-header h3 { flex: 1; font-size: 18px; font-weight: 600; color: var(--text); }
@@ -106,8 +104,6 @@
         let searchQuery = '';
         let currentImage = null;
         let currentTab = 'chats';
-        let typingTimeout = null;
-        let activeReactionMessage = null;
         
         function showToast(msg) {
             const toast = document.createElement('div');
@@ -138,6 +134,7 @@
         }
         
         function escapeHtml(text) {
+            if (!text) return '';
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
@@ -163,6 +160,13 @@
             }
             localStorage.setItem('pinnedChats', JSON.stringify(pinnedChats));
             render();
+        }
+        
+        function getAvatarHtml(userId) {
+            const contact = contacts.find(c => c.name === userId);
+            const avatarUrl = contact?.avatar;
+            if (avatarUrl) return `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+            return userId.charAt(0).toUpperCase();
         }
         
         function render() {
@@ -191,7 +195,7 @@
                                 ${getAvatarHtml(currentUser)}
                             </div>
                             <span class="user-name">${escapeHtml(currentUser)}</span>
-                            <button class="icon-btn" onclick="openThemeModal()">🎨</button>
+                            <button class="icon-btn" onclick="setTab('settings')">🎨</button>
                         </div>
                     </div>
                     <div class="tabs">
@@ -208,14 +212,6 @@
             `;
             if (currentTab === 'chats' && currentChat) setTimeout(displayMessages, 50);
         }
-        
-function getAvatarHtml(userId) {
-    const user = contacts.find(c => c.name === userId) || { avatar: null };
-    const userFromMap = users?.find ? users.find(u => u.name === userId) : null;
-    const avatarUrl = user?.avatar || userFromMap?.avatar;
-    if (avatarUrl) return `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`;
-    return userId.charAt(0).toUpperCase();
-}
         
         function renderChats() {
             if (currentChat) {
@@ -246,7 +242,6 @@ function getAvatarHtml(userId) {
                 `;
             }
             
-            // Собираем чаты
             let privateChats = [];
             allMessages.forEach(msg => {
                 if (!msg.isGroup) {
@@ -255,10 +250,10 @@ function getAvatarHtml(userId) {
                 }
             });
             
-            const groupChats = groups.filter(g => g.members.includes(currentUser));
+            const groupChats = groups.filter(g => g.members && g.members.includes(currentUser));
             
             const sortChats = (chats, type) => {
-                return chats.sort((a, b) => {
+                return [...chats].sort((a, b) => {
                     const aPinned = isPinned({ type, user: a, id: a.id });
                     const bPinned = isPinned({ type, user: b, id: b.id });
                     if (aPinned && !bPinned) return -1;
@@ -341,9 +336,9 @@ function getAvatarHtml(userId) {
         function renderSearch() {
             const query = searchQuery.toLowerCase();
             const foundMessages = allMessages.filter(m => 
-                m.text?.toLowerCase().includes(query) && 
+                m.text && m.text.toLowerCase().includes(query) && 
                 (!m.isGroup ? (m.from === currentUser || m.to === currentUser) : 
-                groups.find(g => g.id === m.groupId)?.members.includes(currentUser))
+                groups.find(g => g.id === m.groupId)?.members?.includes(currentUser))
             ).slice(-30);
             
             return `
@@ -351,8 +346,8 @@ function getAvatarHtml(userId) {
                     <input type="text" placeholder="🔍 Поиск сообщений..." oninput="searchMessages(this.value)" autofocus>
                 </div>
                 <div class="settings-title">📝 Найдено: ${foundMessages.length}</div>
-                ${foundMessages.map(m => `
-                    <div class="chat-item" onclick="openChatFromSearch('${m}')">
+                ${foundMessages.map((m, idx) => `
+                    <div class="chat-item" onclick="openChatFromSearch(${idx})" data-msg='${JSON.stringify(m)}'>
                         <div class="chat-avatar">${m.from === currentUser ? '📤' : '📥'}</div>
                         <div class="chat-info">
                             <div class="chat-name">${escapeHtml(m.from)} → ${m.isGroup ? 'группа' : m.to}</div>
@@ -363,9 +358,21 @@ function getAvatarHtml(userId) {
             `;
         }
         
+        function openChatFromSearch(index) {
+            const items = document.querySelectorAll('.chat-item[data-msg]');
+            if (items[index]) {
+                const msg = JSON.parse(items[index].getAttribute('data-msg'));
+                if (msg.isGroup) {
+                    openGroupChat(msg.groupId, '');
+                } else {
+                    openPrivateChat(msg.from === currentUser ? msg.to : msg.from);
+                }
+            }
+        }
+        
         function renderStats() {
             const myMessages = allMessages.filter(m => m.from === currentUser);
-            const myGroups = groups.filter(g => g.members.includes(currentUser));
+            const myGroups = groups.filter(g => g.members && g.members.includes(currentUser));
             const wordsCount = myMessages.reduce((sum, m) => sum + (m.text?.split(/\s+/).length || 0), 0);
             const activeChats = [...new Set(allMessages.map(m => m.from === currentUser ? m.to : m.from))].filter(c => c);
             
@@ -405,51 +412,50 @@ function getAvatarHtml(userId) {
             `;
         }
         
-function displayMessages() {
-    const container = document.getElementById('messagesArea');
-    if (!container) return;
-    
-    let filtered = [];
-    if (currentChat?.type === 'private') {
-        filtered = allMessages.filter(m => !m.isGroup && 
-            ((m.from === currentUser && m.to === currentChat.user) ||
-             (m.from === currentChat.user && m.to === currentUser)));
-    } else if (currentChat?.type === 'group') {
-        filtered = allMessages.filter(m => m.isGroup && m.groupId === currentChat.id);
-    }
-    
-    container.innerHTML = filtered.map(msg => `
-        <div class="message ${msg.from === currentUser ? 'my' : 'other'}" id="msg-${msg.id}">
-            <div class="message-bubble" style="position:relative;">
-                ${msg.from !== currentUser ? `<div class="message-sender">${escapeHtml(msg.from)}</div>` : ''}
-                ${msg.text ? `<div class="message-text">${escapeHtml(msg.text)}</div>` : ''}
-                ${msg.image ? `<img src="${msg.image}" class="message-image" onclick="window.open('${msg.image}')">` : ''}
-                ${msg.audio ? `
-                    <audio controls style="max-width:200px; margin-top:6px; border-radius:20px;">
-                        <source src="${msg.audio}" type="audio/webm">
-                        Ваш браузер не поддерживает аудио
-                    </audio>
-                ` : ''}
-                <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
-                ${msg.reactions ? `
-                    <div class="message-reactions">
-                        ${Object.entries(msg.reactions).map(([r, count]) => `<span class="reaction" onclick="addReaction(${msg.id}, '${r}')">${r} ${count}</span>`).join('')}
+        function displayMessages() {
+            const container = document.getElementById('messagesArea');
+            if (!container) return;
+            
+            let filtered = [];
+            if (currentChat?.type === 'private') {
+                filtered = allMessages.filter(m => !m.isGroup && 
+                    ((m.from === currentUser && m.to === currentChat.user) ||
+                     (m.from === currentChat.user && m.to === currentUser)));
+            } else if (currentChat?.type === 'group') {
+                filtered = allMessages.filter(m => m.isGroup && m.groupId === currentChat.id);
+            }
+            
+            container.innerHTML = filtered.map(msg => `
+                <div class="message ${msg.from === currentUser ? 'my' : 'other'}" id="msg-${msg.id}">
+                    <div class="message-bubble" style="position:relative;">
+                        ${msg.from !== currentUser ? `<div class="message-sender">${escapeHtml(msg.from)}</div>` : ''}
+                        ${msg.text ? `<div class="message-text">${escapeHtml(msg.text)}</div>` : ''}
+                        ${msg.image ? `<img src="${msg.image}" class="message-image" onclick="window.open('${msg.image}')">` : ''}
+                        ${msg.audio ? `
+                            <audio controls style="max-width:200px; margin-top:6px; border-radius:20px;">
+                                <source src="${msg.audio}" type="audio/webm">
+                            </audio>
+                        ` : ''}
+                        <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                        ${msg.reactions ? `
+                            <div class="message-reactions">
+                                ${Object.entries(msg.reactions).map(([r, count]) => `<span class="reaction" onclick="addReaction(${msg.id}, '${r}')">${r} ${count}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                        <div class="reaction-picker hidden" id="reactions-${msg.id}">
+                            <span onclick="addReaction(${msg.id}, '👍')">👍</span>
+                            <span onclick="addReaction(${msg.id}, '❤️')">❤️</span>
+                            <span onclick="addReaction(${msg.id}, '😂')">😂</span>
+                            <span onclick="addReaction(${msg.id}, '😮')">😮</span>
+                            <span onclick="addReaction(${msg.id}, '😢')">😢</span>
+                            <span onclick="addReaction(${msg.id}, '👎')">👎</span>
+                        </div>
                     </div>
-                ` : ''}
-                <div class="reaction-picker hidden" id="reactions-${msg.id}">
-                    <span onclick="addReaction(${msg.id}, '👍')">👍</span>
-                    <span onclick="addReaction(${msg.id}, '❤️')">❤️</span>
-                    <span onclick="addReaction(${msg.id}, '😂')">😂</span>
-                    <span onclick="addReaction(${msg.id}, '😮')">😮</span>
-                    <span onclick="addReaction(${msg.id}, '😢')">😢</span>
-                    <span onclick="addReaction(${msg.id}, '👎')">👎</span>
                 </div>
-            </div>
-        </div>
-    `).join('');
-    
-    container.scrollTop = container.scrollHeight;
-}
+            `).join('');
+            
+            container.scrollTop = container.scrollHeight;
+        }
         
         function addReaction(messageId, reaction) {
             ws.send(JSON.stringify({ type: 'reaction', messageId, reaction }));
@@ -473,74 +479,74 @@ function displayMessages() {
         }
         
         function sendVoice() {
-            showToast('🎤 Голосовые сообщения будут в следующей версии!');
+            if (!currentChat) { showToast('❌ Откройте чат'); return; }
+            if (!navigator.mediaDevices) { showToast('❌ Ваш браузер не поддерживает запись'); return; }
+            
+            showToast('🎤 Говорите... Отпустите для отправки');
+            
+            const recordBtn = document.createElement('button');
+            recordBtn.innerText = '🔴 Запись... Отпустите';
+            recordBtn.style.position = 'fixed';
+            recordBtn.style.bottom = '100px';
+            recordBtn.style.left = '50%';
+            recordBtn.style.transform = 'translateX(-50%)';
+            recordBtn.style.background = '#ef4444';
+            recordBtn.style.color = 'white';
+            recordBtn.style.padding = '12px 24px';
+            recordBtn.style.border = 'none';
+            recordBtn.style.borderRadius = '30px';
+            recordBtn.style.zIndex = '2000';
+            document.body.appendChild(recordBtn);
+            
+            let mediaRecorder;
+            let audioChunks = [];
+            
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const formData = new FormData();
+                        formData.append('file', audioBlob, 'voice.webm');
+                        
+                        fetch('/upload', { method: 'POST', body: formData })
+                            .then(res => res.json())
+                            .then(data => {
+                                const msg = {
+                                    type: currentChat.type === 'private' ? 'message' : 'group_message',
+                                    text: '🎤 Голосовое',
+                                    audio: data.url
+                                };
+                                if (currentChat.type === 'private') msg.to = currentChat.user;
+                                else msg.groupId = currentChat.id;
+                                ws.send(JSON.stringify(msg));
+                                showToast('✅ Голосовое отправлено');
+                            });
+                        
+                        stream.getTracks().forEach(track => track.stop());
+                        recordBtn.remove();
+                    };
+                    mediaRecorder.start();
+                })
+                .catch(() => showToast('❌ Нет доступа к микрофону'));
+            
+            recordBtn.onmouseup = () => {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            };
+            
+            setTimeout(() => {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            }, 60000);
         }
         
-function sendVoice() {
-    if (!currentChat) { showToast('❌ Откройте чат'); return; }
-    if (!navigator.mediaDevices) { showToast('❌ Ваш браузер не поддерживает запись'); return; }
-    
-    showToast('🎤 Говорите... Отпустите для отправки');
-    
-    const recordBtn = document.createElement('button');
-    recordBtn.innerText = '🔴 Запись... Отпустите';
-    recordBtn.style.position = 'fixed';
-    recordBtn.style.bottom = '100px';
-    recordBtn.style.left = '50%';
-    recordBtn.style.transform = 'translateX(-50%)';
-    recordBtn.style.background = '#ef4444';
-    recordBtn.style.color = 'white';
-    recordBtn.style.padding = '12px 24px';
-    recordBtn.style.border = 'none';
-    recordBtn.style.borderRadius = '30px';
-    recordBtn.style.zIndex = '2000';
-    document.body.appendChild(recordBtn);
-    
-    let mediaRecorder;
-    let audioChunks = [];
-    
-    navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                const formData = new FormData();
-                formData.append('file', audioBlob, 'voice.webm');
-                
-                fetch('/upload', { method: 'POST', body: formData })
-                    .then(res => res.json())
-                    .then(data => {
-                        const msg = {
-                            type: currentChat.type === 'private' ? 'message' : 'group_message',
-                            text: '🎤 Голосовое',
-                            audio: data.url
-                        };
-                        if (currentChat.type === 'private') msg.to = currentChat.user;
-                        else msg.groupId = currentChat.id;
-                        ws.send(JSON.stringify(msg));
-                        showToast('✅ Голосовое отправлено');
-                    });
-                
-                stream.getTracks().forEach(track => track.stop());
-                recordBtn.remove();
-            };
-            mediaRecorder.start();
-        })
-        .catch(() => showToast('❌ Нет доступа к микрофону'));
-    
-    recordBtn.onmouseup = () => {
-        if (mediaRecorder && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop();
+        function toggleStickers() {
+            document.getElementById('stickerPanel')?.classList.toggle('show');
         }
-    };
-    
-    setTimeout(() => {
-        if (mediaRecorder && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop();
-        }
-    }, 60000);
-}
         
         function showUserQR(username) {
             const modal = document.createElement('div');
@@ -548,7 +554,7 @@ function sendVoice() {
             modal.innerHTML = `
                 <div class="modal-content">
                     <h3>QR-код пользователя</h3>
-                    <div class="qr-code" id="qrCode" style="font-size:12px; word-break:break-all;">${username}</div>
+                    <div class="qr-code" style="font-size:12px; word-break:break-all;">${escapeHtml(username)}</div>
                     <p style="margin:12px 0;">${escapeHtml(username)}</p>
                     <button class="send-btn" onclick="this.closest('.modal').remove()">Закрыть</button>
                 </div>
@@ -580,29 +586,11 @@ function sendVoice() {
             input.click();
         }
         
-        function openThemeModal() {
-            // темы уже в настройках
-            setTab('settings');
-        }
-        
-        function searchChats(query) {
-            // фильтрация уже в renderChats
-        }
+        function searchChats(query) {}
         
         function searchMessages(query) {
             searchQuery = query;
             render();
-        }
-        
-        function openChatFromSearch(msgStr) {
-            try {
-                const msg = JSON.parse(msgStr);
-                if (msg.isGroup) {
-                    openGroupChat(msg.groupId, '');
-                } else {
-                    openPrivateChat(msg.from === currentUser ? msg.to : msg.from);
-                }
-            } catch(e) {}
         }
         
         function setTab(tab) {
@@ -733,135 +721,91 @@ function sendVoice() {
             
             ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', userId: currentUser }));
             
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    
-    if (data.type === 'history') { 
-        allMessages = data.messages; 
-        render(); 
-    }
-    else if (data.type === 'groups_list') { 
-        groups = data.groups; 
-        render(); 
-    }
-    else if (data.type === 'contacts_list') { 
-        contacts = data.contacts; 
-        render(); 
-    }
-    else if (data.type === 'message' || data.type === 'group_message') {
-        allMessages.push(data);
-        render();
-        if (currentChat) displayMessages();
-        if (data.from !== currentUser) {
-            let preview = data.text?.slice(0, 30) || '';
-            if (data.audio) preview = '🎤 Голосовое';
-            if (data.image) preview = '📷 Фото';
-            showToast(`${data.from}: ${preview}`);
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'history') { allMessages = data.messages; render(); }
+                else if (data.type === 'groups_list') { groups = data.groups; render(); }
+                else if (data.type === 'contacts_list') { contacts = data.contacts; render(); }
+                else if (data.type === 'message' || data.type === 'group_message') {
+                    allMessages.push(data);
+                    render();
+                    if (currentChat) displayMessages();
+                    if (data.from !== currentUser) {
+                        let preview = data.text?.slice(0, 30) || '';
+                        if (data.audio) preview = '🎤 Голосовое';
+                        if (data.image) preview = '📷 Фото';
+                        showToast(`${data.from}: ${preview}`);
+                    }
+                }
+                else if (data.type === 'typing') {
+                    const indicator = document.getElementById('typingIndicator');
+                    if (indicator) indicator.innerText = `${data.from} печатает...`;
+                    setTimeout(() => { if (indicator) indicator.innerText = ''; }, 2000);
+                }
+                else if (data.type === 'reaction_update') {
+                    const msg = allMessages.find(m => m.id === data.messageId);
+                    if (msg) { msg.reactions = data.reactions; if (currentChat) displayMessages(); }
+                }
+                else if (data.type === 'avatar_update') {
+                    const contact = contacts.find(c => c.name === data.userId);
+                    if (contact) contact.avatar = data.avatar;
+                    render();
+                }
+                else if (data.type === 'online_list') {
+                    data.users.forEach(userId => {
+                        if (userId === currentUser) return;
+                        const contact = contacts.find(c => c.name === userId);
+                        if (contact) contact.online = true;
+                        else contacts.push({ name: userId, online: true, avatar: null });
+                    });
+                    render();
+                }
+                else if (data.type === 'user_online') {
+                    const contact = contacts.find(c => c.name === data.userId);
+                    if (contact) contact.online = true;
+                    else if (data.userId !== currentUser) contacts.push({ name: data.userId, online: true, avatar: null });
+                    render();
+                    if (data.userId !== currentUser) showToast(`🟢 ${data.userId} в сети`);
+                }
+                else if (data.type === 'user_offline') {
+                    const contact = contacts.find(c => c.name === data.userId);
+                    if (contact) contact.online = false;
+                    render();
+                }
+                else if (data.type === 'join_success') { showToast(`✅ Вы в группе ${data.groupName}`); }
+                else if (data.type === 'join_error') { showToast(`❌ ${data.error}`); }
+                else if (data.type === 'contact_added') { showToast(`➕ ${data.contact} добавлен в друзья`); ws.send(JSON.stringify({ type: 'auth', userId: currentUser })); }
+                else if (data.type === 'contact_request') { 
+                    showToast(`📨 ${data.from} хочет добавить вас в друзья`);
+                    if (confirm(`${data.from} хочет стать вашим другом? Принять?`)) {
+                        ws.send(JSON.stringify({ type: 'add_contact', contactName: data.from }));
+                    }
+                }
+                else if (data.type === 'add_contact_error') { showToast(`❌ ${data.error}`); }
+                else if (data.type === 'auth_error') { 
+                    showToast(`❌ ${data.error}`); 
+                    if (data.error.includes('имя')) {
+                        currentUser = '';
+                        localStorage.removeItem('messenger_user');
+                        render();
+                    }
+                }
+                else if (data.type === 'error') { showToast(`❌ ${data.error}`); }
+                else if (data.type === 'group_created') { showToast(`✅ Группа создана`); }
+                else if (data.type === 'left_group') { 
+                    showToast(`🚪 Вы вышли из группы`); 
+                    if (currentChat?.type === 'group' && currentChat.id === data.groupId) closeChat();
+                    render();
+                }
+                else if (data.type === 'group_deleted') { 
+                    showToast(`🗑️ Группа удалена`); 
+                    if (currentChat?.type === 'group' && currentChat.id === data.groupId) closeChat();
+                    render();
+                }
+            };
         }
-    }
-    else if (data.type === 'typing') {
-        const indicator = document.getElementById('typingIndicator');
-        if (indicator) indicator.innerText = `${data.from} печатает...`;
-        setTimeout(() => { if (indicator) indicator.innerText = ''; }, 2000);
-    }
-    else if (data.type === 'reaction_update') {
-        const msg = allMessages.find(m => m.id === data.messageId);
-        if (msg) { 
-            msg.reactions = data.reactions; 
-            if (currentChat) displayMessages(); 
-        }
-    }
-    else if (data.type === 'avatar_update') {
-        // Обновляем аватар в контактах
-        const contact = contacts.find(c => c.name === data.userId);
-        if (contact) contact.avatar = data.avatar;
-        // Обновляем в списке пользователей
-        const userInGroups = groups.flatMap(g => g.members).find(m => m === data.userId);
-        render();
-    }
-    else if (data.type === 'online_list') {
-        // Получаем список всех онлайн пользователей
-        data.users.forEach(userId => {
-            if (userId === currentUser) return;
-            const contact = contacts.find(c => c.name === userId);
-            if (contact) {
-                contact.online = true;
-            } else {
-                contacts.push({ name: userId, online: true, avatar: null });
-            }
-        });
-        render();
-    }
-    else if (data.type === 'user_online') {
-        // Пользователь зашёл в сеть
-        const contact = contacts.find(c => c.name === data.userId);
-        if (contact) {
-            contact.online = true;
-        } else if (data.userId !== currentUser) {
-            contacts.push({ name: data.userId, online: true, avatar: null });
-        }
-        render();
-        if (data.userId !== currentUser) {
-            showToast(`🟢 ${data.userId} в сети`);
-        }
-    }
-    else if (data.type === 'user_offline') {
-        // Пользователь вышел
-        const contact = contacts.find(c => c.name === data.userId);
-        if (contact) {
-            contact.online = false;
-            render();
-        }
-    }
-    else if (data.type === 'join_success') { 
-        showToast(`✅ Вы в группе ${data.groupName}`); 
-    }
-    else if (data.type === 'join_error') { 
-        showToast(`❌ ${data.error}`); 
-    }
-    else if (data.type === 'contact_added') { 
-        showToast(`➕ ${data.contact} добавлен в друзья`); 
-        // Обновляем список контактов
-        ws.send(JSON.stringify({ type: 'auth', userId: currentUser }));
-    }
-    else if (data.type === 'contact_request') { 
-        showToast(`📨 ${data.from} хочет добавить вас в друзья`);
-        if (confirm(`${data.from} хочет стать вашим другом? Принять?`)) {
-            ws.send(JSON.stringify({ type: 'add_contact', contactName: data.from }));
-        }
-    }
-    else if (data.type === 'add_contact_error') { 
-        showToast(`❌ ${data.error}`); 
-    }
-    else if (data.type === 'auth_error') { 
-        showToast(`❌ ${data.error}`); 
-        if (data.error.includes('имя')) {
-            currentUser = '';
-            localStorage.removeItem('messenger_user');
-            render();
-        }
-    }
-    else if (data.type === 'error') { 
-        showToast(`❌ ${data.error}`); 
-    }
-    else if (data.type === 'group_created') { 
-        showToast(`✅ Группа создана`); 
-    }
-    else if (data.type === 'left_group') { 
-        showToast(`🚪 Вы вышли из группы`); 
-        if (currentChat?.type === 'group' && currentChat.id === data.groupId) {
-            closeChat();
-        }
-        render();
-    }
-    else if (data.type === 'group_deleted') { 
-        showToast(`🗑️ Группа удалена`); 
-        if (currentChat?.type === 'group' && currentChat.id === data.groupId) {
-            closeChat();
-        }
-        render();
-    }
-};
+        
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme) setTheme(savedTheme);
         else setTheme('light');
@@ -869,7 +813,6 @@ ws.onmessage = (event) => {
         const savedUser = localStorage.getItem('messenger_user');
         if (savedUser) { currentUser = savedUser; connectWebSocket(); } else { render(); }
         
-        // Глобальные функции
         window.setTab = setTab; window.closeChat = closeChat; window.openPrivateChat = openPrivateChat;
         window.openGroupChat = openGroupChat; window.showCreateGroupModal = showCreateGroupModal;
         window.deleteGroup = deleteGroup; window.leaveGroup = leaveGroup; window.sendMessage = sendMessage;
@@ -879,7 +822,6 @@ ws.onmessage = (event) => {
         window.showUserQR = showUserQR; window.showMyQR = showMyQR; window.openAvatarModal = openAvatarModal;
         window.searchMessages = searchMessages; window.searchChats = searchChats; window.openChatFromSearch = openChatFromSearch;
         window.addReaction = addReaction; window.sendVoice = sendVoice; window.getAvatarHtml = getAvatarHtml;
-        window.openThemeModal = openThemeModal;
     </script>
 </body>
 </html>
