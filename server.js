@@ -13,6 +13,7 @@ const clients = new Map();
 let messages = [];
 const groups = new Map();
 const users = new Map();
+const contactRequests = new Map(); // Заявки в друзья
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -47,10 +48,13 @@ app.post('/upload', upload.single('file'), (req, res) => {
 app.post('/upload-avatar', upload.single('avatar'), (req, res) => {
     if (!req.file || !req.body.userId) return res.status(400).json({ error: 'Missing data' });
     const avatarUrl = `/avatars/${req.file.filename}`;
-    users.set(req.body.userId, { ...users.get(req.body.userId), avatar: avatarUrl });
+    const userData = users.get(req.body.userId) || {};
+    userData.avatar = avatarUrl;
+    users.set(req.body.userId, userData);
     res.json({ avatar: avatarUrl });
 });
 
+// Общая группа
 groups.set('general', {
     name: 'Общий чат',
     members: [],
@@ -80,12 +84,13 @@ function broadcastGroupsList() {
 function broadcastContactsList() {
     const contactsList = [];
     for (const [userId, userData] of users) {
-        contactsList.push({
+        const userInfo = {
             id: userId,
             name: userId,
             avatar: userData?.avatar || null,
             online: clients.has(userId)
-        });
+        };
+        contactsList.push(userInfo);
     }
     for (const [userId, client] of clients) {
         if (client.ws.readyState === WebSocket.OPEN) {
@@ -102,10 +107,15 @@ wss.on('connection', (ws, req) => {
         
         if (msg.type === 'auth') {
             userId = msg.userId;
+            const userData = users.get(userId) || { contacts: [], avatar: null };
+            userData.contacts = userData.contacts || [];
+            users.set(userId, userData);
             clients.set(userId, { ws, avatar: msg.avatar, settings: msg.settings || {} });
             
             if (msg.avatar) {
-                users.set(userId, { ...users.get(userId), avatar: msg.avatar });
+                const user = users.get(userId);
+                user.avatar = msg.avatar;
+                users.set(userId, user);
             }
             
             const generalGroup = groups.get('general');
@@ -113,6 +123,7 @@ wss.on('connection', (ws, req) => {
                 generalGroup.members.push(userId);
             }
             
+            // История сообщений
             const userMessages = messages.filter(m => 
                 (m.to === userId || m.from === userId) && !m.isGroup
             );
@@ -142,6 +153,10 @@ wss.on('connection', (ws, req) => {
                 if (userData?.avatar) avatarsList[uid] = userData.avatar;
             }
             ws.send(JSON.stringify({ type: 'avatars', avatars: avatarsList }));
+            
+            // Отправляем заявки в друзья
+            const requests = contactRequests.get(userId) || [];
+            ws.send(JSON.stringify({ type: 'contact_requests', requests: requests }));
         }
         else if (msg.type === 'message') {
             const newMsg = {
@@ -228,6 +243,68 @@ wss.on('connection', (ws, req) => {
                 broadcastGroupsList();
             }
         }
+        // Добавление контакта
+        else if (msg.type === 'add_contact') {
+            const targetUser = msg.contactName;
+            if (!users.has(targetUser)) {
+                ws.send(JSON.stringify({ type: 'add_contact_error', error: 'Пользователь не найден' }));
+                return;
+            }
+            // Отправляем заявку
+            const requests = contactRequests.get(targetUser) || [];
+            if (!requests.includes(userId)) {
+                requests.push(userId);
+                contactRequests.set(targetUser, requests);
+                const targetClient = clients.get(targetUser);
+                if (targetClient?.ws.readyState === WebSocket.OPEN) {
+                    targetClient.ws.send(JSON.stringify({
+                        type: 'contact_request',
+                        from: userId
+                    }));
+                }
+            }
+            ws.send(JSON.stringify({ type: 'contact_request_sent', to: targetUser }));
+        }
+        else if (msg.type === 'accept_contact') {
+            const fromUser = msg.from;
+            const userData = users.get(userId);
+            if (!userData.contacts) userData.contacts = [];
+            if (!userData.contacts.includes(fromUser)) {
+                userData.contacts.push(fromUser);
+                users.set(userId, userData);
+            }
+            const fromUserData = users.get(fromUser);
+            if (!fromUserData.contacts) fromUserData.contacts = [];
+            if (!fromUserData.contacts.includes(userId)) {
+                fromUserData.contacts.push(userId);
+                users.set(fromUser, fromUserData);
+            }
+            // Удаляем заявку
+            const requests = contactRequests.get(userId) || [];
+            const index = requests.indexOf(fromUser);
+            if (index !== -1) requests.splice(index, 1);
+            contactRequests.set(userId, requests);
+            
+            broadcastContactsList();
+            ws.send(JSON.stringify({ type: 'contact_accepted', contact: fromUser }));
+            const fromClient = clients.get(fromUser);
+            if (fromClient?.ws.readyState === WebSocket.OPEN) {
+                fromClient.ws.send(JSON.stringify({ type: 'contact_accepted', contact: userId }));
+            }
+        }
+        else if (msg.type === 'reject_contact') {
+            const fromUser = msg.from;
+            const requests = contactRequests.get(userId) || [];
+            const index = requests.indexOf(fromUser);
+            if (index !== -1) requests.splice(index, 1);
+            contactRequests.set(userId, requests);
+            ws.send(JSON.stringify({ type: 'contact_rejected', contact: fromUser }));
+        }
+        else if (msg.type === 'get_contacts') {
+            const userData = users.get(userId);
+            ws.send(JSON.stringify({ type: 'my_contacts', contacts: userData?.contacts || [] }));
+        }
+        // WebRTC звонки
         else if (msg.type === 'call_offer') {
             const target = clients.get(msg.to);
             if (target?.ws.readyState === WebSocket.OPEN) {
