@@ -54,6 +54,22 @@ app.post('/upload-avatar', upload.single('avatar'), (req, res) => {
     res.json({ avatar: avatarUrl });
 });
 
+app.post('/clear-user-data', (req, res) => {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'No userId' });
+    
+    // Удаляем сообщения пользователя
+    messages = messages.filter(m => m.from !== userId && m.to !== userId);
+    
+    // Удаляем из групп
+    for (const [groupId, group] of groups) {
+        const index = group.members.indexOf(userId);
+        if (index !== -1) group.members.splice(index, 1);
+    }
+    
+    res.json({ success: true });
+});
+
 // Общая группа
 groups.set('general', {
     name: 'Общий чат',
