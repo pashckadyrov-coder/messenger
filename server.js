@@ -246,7 +246,59 @@ wss.on('connection', (ws) => {
                     }
                 }
             }
-        } catch(e) { console.error(e); }
+            
+            // ========== ВЕБРТС ЗВОНКИ ==========
+            else if (data.type === 'call_offer') {
+                const targetWs = clients.get(data.to);
+                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+                    targetWs.send(JSON.stringify({
+                        type: 'call_offer',
+                        from: currentUser,
+                        offer: data.offer,
+                        callId: data.callId,
+                        video: data.video
+                    }));
+                    console.log(`📞 Звонок от ${currentUser} к ${data.to}`);
+                } else {
+                    ws.send(JSON.stringify({ type: 'error', error: 'Пользователь не в сети' }));
+                }
+            }
+            
+            else if (data.type === 'call_answer') {
+                const targetWs = clients.get(data.to);
+                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+                    targetWs.send(JSON.stringify({
+                        type: 'call_answer',
+                        from: currentUser,
+                        answer: data.answer,
+                        callId: data.callId
+                    }));
+                }
+            }
+            
+            else if (data.type === 'ice_candidate') {
+                const targetWs = clients.get(data.to);
+                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+                    targetWs.send(JSON.stringify({
+                        type: 'ice_candidate',
+                        from: currentUser,
+                        candidate: data.candidate,
+                        callId: data.callId
+                    }));
+                }
+            }
+            
+            else if (data.type === 'end_call') {
+                const targetWs = clients.get(data.to);
+                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+                    targetWs.send(JSON.stringify({ type: 'end_call', from: currentUser }));
+                }
+                console.log(`📞 Звонок завершён: ${currentUser} -> ${data.to}`);
+            }
+            
+        } catch(e) { 
+            console.error('WebSocket error:', e); 
+        }
     });
     
     ws.on('close', () => {
