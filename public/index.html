@@ -563,7 +563,8 @@
             }, 60000);
         }
         
-        // ========== ВИДЕОЗВОНКИ И ГОЛОСОВЫЕ ЗВОНКИ ==========
+// ========== ВИДЕОЗВОНКИ И ГОЛОСОВЫЕ ЗВОНКИ ==========
+
 async function startCall(userId, video) {
     if (!userId) { showToast('❌ Выберите контакт'); return; }
     
@@ -578,11 +579,13 @@ async function startCall(userId, video) {
         
         peerConnection = new RTCPeerConnection(configuration);
         
+        // Добавляем все треки
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
-            console.log('Добавлен трек:', track.kind);
+            console.log('📤 Отправляем трек:', track.kind);
         });
         
+        // Отправляем ICE кандидаты
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 ws.send(JSON.stringify({ 
@@ -594,8 +597,9 @@ async function startCall(userId, video) {
             }
         };
         
+        // Получаем удалённые треки
         peerConnection.ontrack = (event) => {
-            console.log('Получен трек:', event.track.kind);
+            console.log('📥 Получен трек:', event.track.kind);
             if (event.streams[0]) {
                 if (event.track.kind === 'video') {
                     const remoteVideo = document.getElementById('remoteVideo');
@@ -604,25 +608,30 @@ async function startCall(userId, video) {
                         remoteVideo.play().catch(e => console.log(e));
                     }
                 } else if (event.track.kind === 'audio') {
+                    // Для аудио — используем любой элемент или создаём
                     const remoteAudio = document.getElementById('remoteAudio');
                     if (remoteAudio) {
                         remoteAudio.srcObject = event.streams[0];
                         remoteAudio.play().catch(e => console.log(e));
                     } else {
+                        // Если нет элемента, создаём временный
                         const audio = new Audio();
                         audio.srcObject = event.streams[0];
                         audio.play().catch(e => console.log(e));
+                        console.log('🎵 Создан временный аудиоэлемент');
                     }
                 }
             }
         };
         
+        // Создаём offer с приёмом аудио и видео
         const offer = await peerConnection.createOffer({
             offerToReceiveAudio: true,
             offerToReceiveVideo: video
         });
         await peerConnection.setLocalDescription(offer);
         
+        // Отправляем offer
         ws.send(JSON.stringify({ 
             type: 'call_offer', 
             to: userId, 
@@ -640,23 +649,26 @@ async function startCall(userId, video) {
     }
 }
 
-        async function answerCall(from, offer, callId, video) {
+async function answerCall(from, offer, callId, video) {
     currentCallWith = from;
     currentCallId = callId;
     
     try {
+        // ВАЖНО: запрашиваем аудио ВСЕГДА
         localStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true,
+            audio: true,  // <- ОБЯЗАТЕЛЬНО!
             video: video ? { width: 640, height: 480 } : false 
         });
         
         peerConnection = new RTCPeerConnection(configuration);
         
+        // Добавляем свои треки
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
-            console.log('Добавлен трек:', track.kind);
+            console.log('📤 Отправляем трек (answer):', track.kind);
         });
         
+        // Отправляем ICE кандидаты
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 ws.send(JSON.stringify({ 
@@ -668,25 +680,44 @@ async function startCall(userId, video) {
             }
         };
         
+        // Получаем удалённые треки (звук собеседника)
         peerConnection.ontrack = (event) => {
-            console.log('Получен трек:', event.track.kind);
+            console.log('📥 Получен трек (answer):', event.track.kind);
             if (event.streams[0]) {
-                const remoteVideo = document.getElementById('remoteVideo');
-                if (remoteVideo && event.track.kind === 'video') {
-                    remoteVideo.srcObject = event.streams[0];
-                    remoteVideo.play().catch(e => console.log(e));
+                if (event.track.kind === 'video') {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        remoteVideo.srcObject = event.streams[0];
+                        remoteVideo.play().catch(e => console.log(e));
+                    }
+                } else if (event.track.kind === 'audio') {
+                    // ВОТ ЗДЕСЬ — ВОСПРОИЗВОДИМ АУДИО
+                    const remoteAudio = document.getElementById('remoteAudio');
+                    if (remoteAudio) {
+                        remoteAudio.srcObject = event.streams[0];
+                        remoteAudio.play().catch(e => console.log(e));
+                        console.log('🎵 Аудио подключено к remoteAudio');
+                    } else {
+                        const audio = new Audio();
+                        audio.srcObject = event.streams[0];
+                        audio.play().catch(e => console.log(e));
+                        console.log('🎵 Создан временный аудиоэлемент');
+                    }
                 }
             }
         };
         
+        // Устанавливаем удалённое описание (offer от звонящего)
         await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
         
+        // Создаём ответ — ВАЖНО: запрашиваем приём аудио!
         const answer = await peerConnection.createAnswer({
-            offerToReceiveAudio: true,
+            offerToReceiveAudio: true,   // <- ОБЯЗАТЕЛЬНО!
             offerToReceiveVideo: video
         });
         await peerConnection.setLocalDescription(answer);
         
+        // Отправляем ответ
         ws.send(JSON.stringify({ 
             type: 'call_answer', 
             to: from, 
@@ -695,42 +726,56 @@ async function startCall(userId, video) {
         }));
         
         showCallUI(video, false);
+        console.log('✅ Ответ отправлен, ожидаем аудио от', from);
         
     } catch (err) {
-        console.error(err);
+        console.error('Ошибка в answerCall:', err);
         endCall();
     }
 }
-        
+
 async function handleAnswer(answer) {
     if (peerConnection && peerConnection.currentRemoteDescription === null) {
         try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            console.log('✅ Remote description установлен');
         } catch (err) {
             console.error('Ошибка установки remote description:', err);
         }
     }
 }
-        
-        async function handleIceCandidate(candidate) {
-            if (peerConnection) await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+
+async function handleIceCandidate(candidate) {
+    if (peerConnection) {
+        try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            console.log('✅ ICE кандидат добавлен');
+        } catch (err) {
+            console.error('Ошибка ICE:', err);
         }
-        
-        function endCall() {
-            if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-            if (peerConnection) { peerConnection.close(); peerConnection = null; }
-            if (currentCallWith) {
-                ws.send(JSON.stringify({ type: 'end_call', to: currentCallWith }));
-                currentCallWith = null;
-            }
-            document.getElementById('callModal')?.remove();
-            showToast('🔴 Звонок завершён');
-        }
-        
-       function showCallUI(video, isCaller) {
+    }
+}
+
+function endCall() {
+    if (localStream) { 
+        localStream.getTracks().forEach(t => t.stop()); 
+        localStream = null; 
+    }
+    if (peerConnection) { 
+        peerConnection.close(); 
+        peerConnection = null; 
+    }
+    if (currentCallWith) {
+        ws.send(JSON.stringify({ type: 'end_call', to: currentCallWith }));
+        currentCallWith = null;
+    }
+    document.getElementById('callModal')?.remove();
+    showToast('🔴 Звонок завершён');
+}
+
+function showCallUI(video, isCaller) {
     const modal = document.createElement('div');
     modal.id = 'callModal';
-    modal.className = 'call-modal';
     modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:3000;';
     
     if (video) {
@@ -742,12 +787,12 @@ async function handleAnswer(answer) {
             <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
         `;
     } else {
-        // Аудиозвонок — добавляем скрытый аудиоэлемент
         modal.innerHTML = `
             <div style="text-align:center;margin-bottom:20px;">
                 <div style="font-size:80px;margin-bottom:20px;">🎤</div>
                 <h2 style="color:white;">Аудиозвонок</h2>
-                <audio id="remoteAudio" autoplay style="display:none;"></audio>
+                <audio id="remoteAudio" autoplay style="display:block;margin-top:20px;"></audio>
+                <div style="margin-top:20px;color:#aaa;">Говорите...</div>
             </div>
             <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
         `;
@@ -760,10 +805,10 @@ async function handleAnswer(answer) {
         localVideo.play().catch(e => console.log(e));
     }
 }
+
 function showIncomingCall(from, offer, callId, video) {
     const modal = document.createElement('div');
     modal.id = 'callModal';
-    modal.className = 'call-modal';
     modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:3000;';
     
     modal.innerHTML = `
