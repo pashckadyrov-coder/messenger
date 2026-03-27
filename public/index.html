@@ -568,9 +568,9 @@ async function startCall(userId, video) {
     if (!userId) { showToast('❌ Выберите контакт'); return; }
     
     try {
-        // Запрашиваем медиа
+        // Запрашиваем медиа — ВАЖНО: аудио всегда true
         localStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true, 
+            audio: true,  // <- АУДИО ВСЕГДА ВКЛЮЧЕНО
             video: video ? { width: 640, height: 480 } : false 
         });
         
@@ -579,9 +579,10 @@ async function startCall(userId, video) {
         
         peerConnection = new RTCPeerConnection(configuration);
         
-        // Добавляем все треки в peerConnection
+        // Добавляем ВСЕ треки (и аудио, и видео)
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
+            console.log('Добавлен трек:', track.kind); // Должно показать 'audio' и 'video'
         });
         
         // Отправляем ICE кандидаты
@@ -598,15 +599,22 @@ async function startCall(userId, video) {
         
         // Получаем удалённый поток
         peerConnection.ontrack = (event) => {
-            const remoteVideo = document.getElementById('remoteVideo');
-            if (remoteVideo && event.streams[0]) {
-                remoteVideo.srcObject = event.streams[0];
-                remoteVideo.play().catch(e => console.log(e));
+            console.log('Получен трек:', event.track.kind); // Должно показать 'audio' и 'video'
+            if (event.streams[0]) {
+                const remoteVideo = document.getElementById('remoteVideo');
+                if (remoteVideo && event.track.kind === 'video') {
+                    remoteVideo.srcObject = event.streams[0];
+                    remoteVideo.play().catch(e => console.log(e));
+                }
+                // Для аудио — просто добавляем в поток, звук пойдёт автоматически
             }
         };
         
         // Создаём offer
-        const offer = await peerConnection.createOffer();
+        const offer = await peerConnection.createOffer({
+            offerToReceiveAudio: true,   // <- ВАЖНО: принимать аудио
+            offerToReceiveVideo: video   // принимать видео если нужно
+        });
         await peerConnection.setLocalDescription(offer);
         
         // Отправляем offer
@@ -624,66 +632,6 @@ async function startCall(userId, video) {
     } catch (err) {
         showToast('❌ Нет доступа к камере/микрофону');
         console.error(err);
-    }
-}
-       async function answerCall(from, offer, callId, video) {
-    currentCallWith = from;
-    currentCallId = callId;
-    
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true, 
-            video: video ? { width: 640, height: 480 } : false 
-        });
-        
-        peerConnection = new RTCPeerConnection(configuration);
-        
-        // Добавляем треки
-        localStream.getTracks().forEach(track => {
-            peerConnection.addTrack(track, localStream);
-        });
-        
-        // ICE кандидаты
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                ws.send(JSON.stringify({ 
-                    type: 'ice_candidate', 
-                    to: from, 
-                    candidate: event.candidate, 
-                    callId: callId 
-                }));
-            }
-        };
-        
-        // Получаем удалённый поток
-        peerConnection.ontrack = (event) => {
-            const remoteVideo = document.getElementById('remoteVideo');
-            if (remoteVideo && event.streams[0]) {
-                remoteVideo.srcObject = event.streams[0];
-                remoteVideo.play().catch(e => console.log(e));
-            }
-        };
-        
-        // Устанавливаем удалённое описание
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-        
-        // Создаём ответ
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        
-        // Отправляем ответ
-        ws.send(JSON.stringify({ 
-            type: 'call_answer', 
-            to: from, 
-            answer: peerConnection.localDescription, 
-            callId: callId 
-        }));
-        
-        showCallUI(video, false);
-        
-    } catch (err) {
-        console.error(err);
-        endCall();
     }
 }
         
