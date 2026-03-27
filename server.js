@@ -9,374 +9,361 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const clients = new Map();
-let messages = [];
-const groups = new Map();
-const users = new Map();
-const contactRequests = new Map(); // Заявки в друзья
+// ========== НАСТРОЙКИ ==========
+const PORT = process.env.PORT || 3000;
+const clients = new Map(); // userId -> ws
+const users = new Map(); // userId -> { name, avatar, online, lastSeen, contacts, createdAt }
+const groups = new Map(); // groupId -> { name, owner, members, password, createdAt }
+const messages = []; // все сообщения
+const typingStatus = new Map(); // userId -> { to, timeout }
 
+// Настройка загрузки файлов
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const uploadDir = path.join(__dirname, 'uploads');
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-        cb(null, uploadDir);
-    },
+    destination: './uploads/',
     filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + ext);
+        const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, unique + path.extname(file.originalname));
     }
 });
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
-
-const uploadsDir = path.join(__dirname, 'uploads');
-const avatarsDir = path.join(__dirname, 'avatars');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
-if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir);
-
+app.use(express.json());
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
-app.use('/avatars', express.static('avatars'));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// ========== ФИЛЬТР МАТЕРНЫХ СЛОВ ==========
+const BAD_WORDS = [
+    'бля', 'блядь', 'блядина', 'хуй', 'хуёвый', 'хуйло', 'хуйня', 'хуесос', 'пизда', 'пиздец',
+    'ебать', 'ебанутый', 'еблан', 'ёбаный', 'залупа', 'мудак', 'гандон', 'пидор', 'пидорас',
+    'срать', 'дерьмо', 'говно', 'шлюха', 'даун', 'дебил', 'идиот', 'лох', 'чмо', 'сука', 'тварь',
+    'fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt'
+];
+
+function containsBadWords(text) {
+    const lower = text.toLowerCase();
+    return BAD_WORDS.some(word => lower.includes(word));
+}
+
+function validateUsername(name) {
+    if (!name || name.length < 2) return 'Имя слишком короткое';
+    if (name.length > 20) return 'Имя слишком длинное';
+    if (containsBadWords(name)) return 'Имя содержит запрещённые слова';
+    return null;
+}
+
+// ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+function broadcast(data, filter = null) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN && (!filter || filter(client))) {
+            client.send(JSON.stringify(data));
+        }
+    });
+}
+
+function getUserData(userId) {
+    const user = users.get(userId);
+    if (!user) return null;
+    return {
+        id: userId,
+        name: user.name,
+        avatar: user.avatar || null,
+        online: user.online,
+        lastSeen: user.lastSeen,
+        createdAt: user.createdAt
+    };
+}
+
+function saveData() {
+    const data = {
+        users: Array.from(users.entries()),
+        groups: Array.from(groups.entries()),
+        messages: messages
+    };
+    fs.writeFileSync('./data.json', JSON.stringify(data, null, 2));
+}
+
+function loadData() {
+    try {
+        const data = JSON.parse(fs.readFileSync('./data.json', 'utf8'));
+        data.users.forEach(([id, user]) => users.set(id, user));
+        data.groups.forEach(([id, group]) => groups.set(id, group));
+        messages.push(...data.messages);
+    } catch (e) {}
+}
+
+// Загружаем данные при старте
+if (!fs.existsSync('./data.json')) fs.writeFileSync('./data.json', '{}');
+loadData();
+
+// ========== API ЭНДПОИНТЫ ==========
 app.post('/upload', upload.single('file'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file' });
+    if (!req.file) return res.status(400).json({ error: 'Нет файла' });
     res.json({ url: `/uploads/${req.file.filename}` });
 });
 
 app.post('/upload-avatar', upload.single('avatar'), (req, res) => {
-    if (!req.file || !req.body.userId) return res.status(400).json({ error: 'Missing data' });
-    const avatarUrl = `/avatars/${req.file.filename}`;
-    const userData = users.get(req.body.userId) || {};
-    userData.avatar = avatarUrl;
-    users.set(req.body.userId, userData);
-    res.json({ avatar: avatarUrl });
-});
-
-app.post('/clear-user-data', (req, res) => {
     const { userId } = req.body;
-    if (!userId) return res.status(400).json({ error: 'No userId' });
-    
-    // Удаляем сообщения пользователя
-    messages = messages.filter(m => m.from !== userId && m.to !== userId);
-    
-    // Удаляем из групп
-    for (const [groupId, group] of groups) {
-        const index = group.members.indexOf(userId);
-        if (index !== -1) group.members.splice(index, 1);
+    if (!req.file || !userId) return res.status(400).json({ error: 'Ошибка' });
+    const user = users.get(userId);
+    if (user) {
+        user.avatar = `/uploads/${req.file.filename}`;
+        users.set(userId, user);
+        saveData();
+        broadcast({ type: 'avatar_update', userId, avatar: user.avatar });
+        res.json({ url: user.avatar });
+    } else {
+        res.status(404).json({ error: 'Пользователь не найден' });
     }
-    
-    res.json({ success: true });
 });
 
-// Общая группа
-groups.set('general', {
-    name: 'Общий чат',
-    members: [],
-    messages: [],
-    password: null,
-    owner: null
+app.get('/user/:userId', (req, res) => {
+    const user = getUserData(req.params.userId);
+    if (user) res.json(user);
+    else res.status(404).json({ error: 'Не найден' });
 });
 
-function broadcastGroupsList() {
-    const groupsList = [];
-    for (const [groupId, group] of groups) {
-        groupsList.push({ 
-            id: groupId, 
-            name: group.name, 
-            members: group.members,
-            hasPassword: !!group.password,
-            owner: group.owner
-        });
-    }
-    for (const [userId, client] of clients) {
-        if (client.ws.readyState === WebSocket.OPEN) {
-            client.ws.send(JSON.stringify({ type: 'groups_list', groups: groupsList }));
-        }
-    }
-}
+// ========== WEBSOCKET ==========
+wss.on('connection', (ws) => {
+    let currentUser = null;
 
-function broadcastContactsList() {
-    const contactsList = [];
-    for (const [userId, userData] of users) {
-        const userInfo = {
-            id: userId,
-            name: userId,
-            avatar: userData?.avatar || null,
-            online: clients.has(userId)
-        };
-        contactsList.push(userInfo);
-    }
-    for (const [userId, client] of clients) {
-        if (client.ws.readyState === WebSocket.OPEN) {
-            client.ws.send(JSON.stringify({ type: 'contacts_list', contacts: contactsList }));
-        }
-    }
-}
-
-wss.on('connection', (ws, req) => {
-    let userId = null;
-
-    ws.on('message', (data) => {
-        const msg = JSON.parse(data);
-        
-        if (msg.type === 'auth') {
-            userId = msg.userId;
-            const userData = users.get(userId) || { contacts: [], avatar: null };
-            userData.contacts = userData.contacts || [];
-            users.set(userId, userData);
-            clients.set(userId, { ws, avatar: msg.avatar, settings: msg.settings || {} });
+    ws.on('message', (rawData) => {
+        try {
+            const data = JSON.parse(rawData);
             
-            if (msg.avatar) {
-                const user = users.get(userId);
-                user.avatar = msg.avatar;
-                users.set(userId, user);
-            }
-            
-            const generalGroup = groups.get('general');
-            if (generalGroup && !generalGroup.members.includes(userId)) {
-                generalGroup.members.push(userId);
-            }
-            
-            // История сообщений
-            const userMessages = messages.filter(m => 
-                (m.to === userId || m.from === userId) && !m.isGroup
-            );
-            
-            const groupMessages = [];
-            for (const [groupId, group] of groups) {
-                group.messages.forEach(msg => {
-                    groupMessages.push({
-                        ...msg,
-                        isGroup: true,
-                        groupId,
-                        groupName: group.name
-                    });
-                });
-            }
-            
-            ws.send(JSON.stringify({
-                type: 'history',
-                messages: [...userMessages, ...groupMessages].slice(-100)
-            }));
-            
-            broadcastGroupsList();
-            broadcastContactsList();
-            
-            const avatarsList = {};
-            for (const [uid, userData] of users) {
-                if (userData?.avatar) avatarsList[uid] = userData.avatar;
-            }
-            ws.send(JSON.stringify({ type: 'avatars', avatars: avatarsList }));
-            
-            // Отправляем заявки в друзья
-            const requests = contactRequests.get(userId) || [];
-            ws.send(JSON.stringify({ type: 'contact_requests', requests: requests }));
-        }
-        else if (msg.type === 'message') {
-            const newMsg = {
-                from: userId,
-                to: msg.to,
-                text: msg.text || '',
-                image: msg.image || null,
-                timestamp: Date.now(),
-                isGroup: false
-            };
-            messages.push(newMsg);
-            
-            const target = clients.get(msg.to);
-            if (target?.ws.readyState === WebSocket.OPEN) {
-                target.ws.send(JSON.stringify({ type: 'message', ...newMsg }));
-            }
-            ws.send(JSON.stringify({ type: 'message', ...newMsg }));
-        }
-        else if (msg.type === 'group_message') {
-            const group = groups.get(msg.groupId);
-            if (group) {
-                const newMsg = {
-                    from: userId,
-                    text: msg.text || '',
-                    image: msg.image || null,
-                    timestamp: Date.now(),
-                    isGroup: true,
-                    groupId: msg.groupId,
-                    groupName: group.name
-                };
-                group.messages.push(newMsg);
-                
-                group.members.forEach(memberId => {
-                    const member = clients.get(memberId);
-                    if (member?.ws.readyState === WebSocket.OPEN) {
-                        member.ws.send(JSON.stringify({ type: 'group_message', ...newMsg }));
+            switch (data.type) {
+                case 'auth':
+                    const error = validateUsername(data.userId);
+                    if (error) {
+                        ws.send(JSON.stringify({ type: 'auth_error', error }));
+                        return;
                     }
-                });
+                    
+                    currentUser = data.userId;
+                    let user = users.get(currentUser);
+                    if (!user) {
+                        user = {
+                            name: currentUser,
+                            avatar: null,
+                            online: true,
+                            lastSeen: Date.now(),
+                            contacts: [],
+                            createdAt: Date.now()
+                        };
+                        users.set(currentUser, user);
+                        saveData();
+                    } else {
+                        user.online = true;
+                        user.lastSeen = Date.now();
+                        users.set(currentUser, user);
+                    }
+                    clients.set(currentUser, ws);
+                    
+                    // Отправляем историю
+                    const userMessages = messages.filter(m => 
+                        (m.from === currentUser || m.to === currentUser) ||
+                        (m.isGroup && groups.get(m.groupId)?.members?.includes(currentUser))
+                    );
+                    ws.send(JSON.stringify({ type: 'history', messages: userMessages }));
+                    
+                    // Отправляем группы
+                    const userGroups = Array.from(groups.values()).filter(g => g.members.includes(currentUser));
+                    ws.send(JSON.stringify({ type: 'groups_list', groups: userGroups }));
+                    
+                    // Отправляем контакты
+                    const contacts = user.contacts.map(c => getUserData(c)).filter(c => c);
+                    ws.send(JSON.stringify({ type: 'contacts_list', contacts }));
+                    
+                    // Рассылаем статус онлайн
+                    broadcast({ type: 'user_online', userId: currentUser });
+                    break;
+                
+                case 'message':
+                    if (containsBadWords(data.text)) {
+                        ws.send(JSON.stringify({ type: 'error', error: 'Сообщение содержит запрещённые слова' }));
+                        return;
+                    }
+                    const msg = {
+                        type: 'message',
+                        id: Date.now(),
+                        from: currentUser,
+                        to: data.to,
+                        text: data.text || '',
+                        image: data.image || null,
+                        timestamp: Date.now()
+                    };
+                    messages.push(msg);
+                    saveData();
+                    
+                    // Отправляем получателю
+                    const recipientWs = clients.get(data.to);
+                    if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
+                        recipientWs.send(JSON.stringify(msg));
+                    }
+                    ws.send(JSON.stringify(msg));
+                    break;
+                
+                case 'group_message':
+                    const group = groups.get(data.groupId);
+                    if (!group || !group.members.includes(currentUser)) return;
+                    
+                    if (containsBadWords(data.text)) {
+                        ws.send(JSON.stringify({ type: 'error', error: 'Сообщение содержит запрещённые слова' }));
+                        return;
+                    }
+                    
+                    const groupMsg = {
+                        type: 'group_message',
+                        id: Date.now(),
+                        from: currentUser,
+                        groupId: data.groupId,
+                        text: data.text || '',
+                        image: data.image || null,
+                        timestamp: Date.now(),
+                        isGroup: true
+                    };
+                    messages.push(groupMsg);
+                    saveData();
+                    
+                    // Отправляем всем участникам
+                    group.members.forEach(memberId => {
+                        const memberWs = clients.get(memberId);
+                        if (memberWs && memberWs.readyState === WebSocket.OPEN) {
+                            memberWs.send(JSON.stringify(groupMsg));
+                        }
+                    });
+                    break;
+                
+                case 'create_group':
+                    const groupId = Date.now().toString();
+                    const newGroup = {
+                        id: groupId,
+                        name: data.groupName,
+                        owner: currentUser,
+                        members: [currentUser],
+                        password: data.password || null,
+                        createdAt: Date.now()
+                    };
+                    groups.set(groupId, newGroup);
+                    saveData();
+                    ws.send(JSON.stringify({ type: 'group_created', group: newGroup }));
+                    broadcast({ type: 'groups_list', groups: Array.from(groups.values()) });
+                    break;
+                
+                case 'join_group':
+                    const targetGroup = groups.get(data.groupId);
+                    if (!targetGroup) {
+                        ws.send(JSON.stringify({ type: 'join_error', error: 'Группа не найдена' }));
+                        return;
+                    }
+                    if (targetGroup.password && targetGroup.password !== data.password) {
+                        ws.send(JSON.stringify({ type: 'join_error', error: 'Неверный пароль' }));
+                        return;
+                    }
+                    if (!targetGroup.members.includes(currentUser)) {
+                        targetGroup.members.push(currentUser);
+                        groups.set(data.groupId, targetGroup);
+                        saveData();
+                        ws.send(JSON.stringify({ type: 'join_success', groupName: targetGroup.name }));
+                    }
+                    break;
+                
+                case 'leave_group':
+                    const leaveGroup = groups.get(data.groupId);
+                    if (leaveGroup && leaveGroup.members.includes(currentUser)) {
+                        leaveGroup.members = leaveGroup.members.filter(m => m !== currentUser);
+                        if (leaveGroup.members.length === 0) {
+                            groups.delete(data.groupId);
+                        } else if (leaveGroup.owner === currentUser && leaveGroup.members.length > 0) {
+                            leaveGroup.owner = leaveGroup.members[0];
+                        }
+                        groups.set(data.groupId, leaveGroup);
+                        saveData();
+                        ws.send(JSON.stringify({ type: 'left_group', groupId: data.groupId }));
+                    }
+                    break;
+                
+                case 'delete_group':
+                    const delGroup = groups.get(data.groupId);
+                    if (delGroup && delGroup.owner === currentUser) {
+                        groups.delete(data.groupId);
+                        saveData();
+                        broadcast({ type: 'group_deleted', groupId: data.groupId });
+                    }
+                    break;
+                
+                case 'add_contact':
+                    const contactUser = users.get(data.contactName);
+                    if (!contactUser) {
+                        ws.send(JSON.stringify({ type: 'add_contact_error', error: 'Пользователь не найден' }));
+                        return;
+                    }
+                    const currentUserData = users.get(currentUser);
+                    if (currentUserData.contacts.includes(data.contactName)) {
+                        ws.send(JSON.stringify({ type: 'add_contact_error', error: 'Контакт уже добавлен' }));
+                        return;
+                    }
+                    currentUserData.contacts.push(data.contactName);
+                    users.set(currentUser, currentUserData);
+                    saveData();
+                    ws.send(JSON.stringify({ type: 'contact_added', contact: data.contactName }));
+                    
+                    // Уведомляем другого пользователя
+                    const contactWs = clients.get(data.contactName);
+                    if (contactWs) {
+                        contactWs.send(JSON.stringify({ type: 'contact_request', from: currentUser }));
+                    }
+                    break;
+                
+                case 'typing':
+                    const typingTo = clients.get(data.to);
+                    if (typingTo) {
+                        typingTo.send(JSON.stringify({ type: 'typing', from: currentUser }));
+                    }
+                    break;
+                
+                case 'reaction':
+                    // Реакция на сообщение
+                    const reactionMsg = messages.find(m => m.id === data.messageId);
+                    if (reactionMsg) {
+                        if (!reactionMsg.reactions) reactionMsg.reactions = {};
+                        reactionMsg.reactions[data.reaction] = (reactionMsg.reactions[data.reaction] || 0) + 1;
+                        saveData();
+                        
+                        // Отправляем обновление всем в чате
+                        if (reactionMsg.isGroup) {
+                            const groupMembers = groups.get(reactionMsg.groupId)?.members || [];
+                            groupMembers.forEach(memberId => {
+                                const memberWs = clients.get(memberId);
+                                if (memberWs) memberWs.send(JSON.stringify({ type: 'reaction_update', messageId: data.messageId, reactions: reactionMsg.reactions }));
+                            });
+                        } else {
+                            const fromWs = clients.get(reactionMsg.from);
+                            const toWs = clients.get(reactionMsg.to);
+                            if (fromWs) fromWs.send(JSON.stringify({ type: 'reaction_update', messageId: data.messageId, reactions: reactionMsg.reactions }));
+                            if (toWs) toWs.send(JSON.stringify({ type: 'reaction_update', messageId: data.messageId, reactions: reactionMsg.reactions }));
+                        }
+                    }
+                    break;
             }
-        }
-        else if (msg.type === 'create_group') {
-            const groupId = Date.now().toString();
-            groups.set(groupId, {
-                name: msg.groupName,
-                members: [userId],
-                messages: [],
-                password: msg.password || null,
-                owner: userId
-            });
-            ws.send(JSON.stringify({ type: 'group_created', groupId, groupName: msg.groupName }));
-            broadcastGroupsList();
-        }
-        else if (msg.type === 'join_group') {
-            const group = groups.get(msg.groupId);
-            if (!group) {
-                ws.send(JSON.stringify({ type: 'join_error', error: 'Группа не найдена' }));
-                return;
-            }
-            if (group.password && group.password !== msg.password) {
-                ws.send(JSON.stringify({ type: 'join_error', error: 'Неверный пароль' }));
-                return;
-            }
-            if (!group.members.includes(userId)) {
-                group.members.push(userId);
-                ws.send(JSON.stringify({ type: 'join_success', groupId: msg.groupId, groupName: group.name }));
-                broadcastGroupsList();
-            }
-        }
-        else if (msg.type === 'delete_group') {
-            const group = groups.get(msg.groupId);
-            if (group && group.owner === userId) {
-                groups.delete(msg.groupId);
-                broadcastGroupsList();
-                ws.send(JSON.stringify({ type: 'group_deleted', groupId: msg.groupId }));
-            } else {
-                ws.send(JSON.stringify({ type: 'delete_error', error: 'Только создатель может удалить группу' }));
-            }
-        }
-        else if (msg.type === 'leave_group') {
-            const group = groups.get(msg.groupId);
-            if (group) {
-                const index = group.members.indexOf(userId);
-                if (index !== -1) group.members.splice(index, 1);
-                broadcastGroupsList();
-            }
-        }
-        // Добавление контакта
-        else if (msg.type === 'add_contact') {
-            const targetUser = msg.contactName;
-            if (!users.has(targetUser)) {
-                ws.send(JSON.stringify({ type: 'add_contact_error', error: 'Пользователь не найден' }));
-                return;
-            }
-            // Отправляем заявку
-            const requests = contactRequests.get(targetUser) || [];
-            if (!requests.includes(userId)) {
-                requests.push(userId);
-                contactRequests.set(targetUser, requests);
-                const targetClient = clients.get(targetUser);
-                if (targetClient?.ws.readyState === WebSocket.OPEN) {
-                    targetClient.ws.send(JSON.stringify({
-                        type: 'contact_request',
-                        from: userId
-                    }));
-                }
-            }
-            ws.send(JSON.stringify({ type: 'contact_request_sent', to: targetUser }));
-        }
-        else if (msg.type === 'accept_contact') {
-            const fromUser = msg.from;
-            const userData = users.get(userId);
-            if (!userData.contacts) userData.contacts = [];
-            if (!userData.contacts.includes(fromUser)) {
-                userData.contacts.push(fromUser);
-                users.set(userId, userData);
-            }
-            const fromUserData = users.get(fromUser);
-            if (!fromUserData.contacts) fromUserData.contacts = [];
-            if (!fromUserData.contacts.includes(userId)) {
-                fromUserData.contacts.push(userId);
-                users.set(fromUser, fromUserData);
-            }
-            // Удаляем заявку
-            const requests = contactRequests.get(userId) || [];
-            const index = requests.indexOf(fromUser);
-            if (index !== -1) requests.splice(index, 1);
-            contactRequests.set(userId, requests);
-            
-            broadcastContactsList();
-            ws.send(JSON.stringify({ type: 'contact_accepted', contact: fromUser }));
-            const fromClient = clients.get(fromUser);
-            if (fromClient?.ws.readyState === WebSocket.OPEN) {
-                fromClient.ws.send(JSON.stringify({ type: 'contact_accepted', contact: userId }));
-            }
-        }
-        else if (msg.type === 'reject_contact') {
-            const fromUser = msg.from;
-            const requests = contactRequests.get(userId) || [];
-            const index = requests.indexOf(fromUser);
-            if (index !== -1) requests.splice(index, 1);
-            contactRequests.set(userId, requests);
-            ws.send(JSON.stringify({ type: 'contact_rejected', contact: fromUser }));
-        }
-        else if (msg.type === 'get_contacts') {
-            const userData = users.get(userId);
-            ws.send(JSON.stringify({ type: 'my_contacts', contacts: userData?.contacts || [] }));
-        }
-        // WebRTC звонки
-        else if (msg.type === 'call_offer') {
-            const target = clients.get(msg.to);
-            if (target?.ws.readyState === WebSocket.OPEN) {
-                target.ws.send(JSON.stringify({
-                    type: 'call_offer',
-                    from: userId,
-                    offer: msg.offer,
-                    callId: msg.callId,
-                    video: msg.video
-                }));
-            }
-        }
-        else if (msg.type === 'call_answer') {
-            const target = clients.get(msg.to);
-            if (target?.ws.readyState === WebSocket.OPEN) {
-                target.ws.send(JSON.stringify({
-                    type: 'call_answer',
-                    from: userId,
-                    answer: msg.answer,
-                    callId: msg.callId
-                }));
-            }
-        }
-        else if (msg.type === 'ice_candidate') {
-            const target = clients.get(msg.to);
-            if (target?.ws.readyState === WebSocket.OPEN) {
-                target.ws.send(JSON.stringify({
-                    type: 'ice_candidate',
-                    from: userId,
-                    candidate: msg.candidate,
-                    callId: msg.callId
-                }));
-            }
-        }
-        else if (msg.type === 'end_call') {
-            const target = clients.get(msg.to);
-            if (target?.ws.readyState === WebSocket.OPEN) {
-                target.ws.send(JSON.stringify({ type: 'end_call', from: userId }));
-            }
-        }
+        } catch (e) {}
     });
-
+    
     ws.on('close', () => {
-        if (userId) {
-            for (const [groupId, group] of groups) {
-                const index = group.members.indexOf(userId);
-                if (index !== -1) group.members.splice(index, 1);
+        if (currentUser) {
+            const user = users.get(currentUser);
+            if (user) {
+                user.online = false;
+                user.lastSeen = Date.now();
+                users.set(currentUser, user);
+                saveData();
+                broadcast({ type: 'user_offline', userId: currentUser });
             }
-            clients.delete(userId);
-            broadcastGroupsList();
-            broadcastContactsList();
+            clients.delete(currentUser);
         }
     });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Сервер запущен: http://localhost:${PORT}`);
+server.listen(PORT, () => {
+    console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
+    if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 });
