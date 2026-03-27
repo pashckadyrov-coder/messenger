@@ -569,8 +569,11 @@ async function startCall(userId, video) {
     if (!userId) { showToast('❌ Выберите контакт'); return; }
     
     try {
+        // 1. СНАЧАЛА создаём UI
+        showCallUI(video, true);
+        
         const mediaConstraints = { 
-            audio: true,  // ВСЕГДА ВКЛЮЧАЕМ АУДИО
+            audio: true,
             video: video ? { width: 640, height: 480 } : false 
         };
         
@@ -582,13 +585,11 @@ async function startCall(userId, video) {
         
         peerConnection = new RTCPeerConnection(configuration);
         
-        // Добавляем ВСЕ треки из локального потока
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
             console.log('📤 startCall: добавляем трек', track.kind);
         });
         
-        // Обработка ICE кандидатов
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 ws.send(JSON.stringify({ 
@@ -597,48 +598,37 @@ async function startCall(userId, video) {
                     candidate: event.candidate, 
                     callId: currentCallId 
                 }));
-                console.log('🔵 startCall: отправил ICE кандидат');
             }
         };
         
-        // Получаем удалённый поток (от отвечающего)
         peerConnection.ontrack = (event) => {
-            console.log('📥 startCall: получен удалённый трек', event.track.kind, 'streams:', event.streams.length);
-            
+            console.log('📥 startCall: получен трек', event.track.kind);
             if (event.streams[0]) {
                 if (event.track.kind === 'video') {
                     const remoteVideo = document.getElementById('remoteVideo');
                     if (remoteVideo) {
                         remoteVideo.srcObject = event.streams[0];
                         remoteVideo.play().catch(e => console.log(e));
-                        console.log('🎥 startCall: видео собеседника подключено');
                     }
                 } else if (event.track.kind === 'audio') {
-                    // Воспроизводим аудио собеседника
                     const remoteAudio = document.getElementById('remoteAudio');
                     if (remoteAudio) {
                         remoteAudio.srcObject = event.streams[0];
                         remoteAudio.play().catch(e => console.log(e));
-                        console.log('🔊 startCall: аудио собеседника подключено');
+                        console.log('🔊 startCall: аудио подключено');
                     } else {
-                        const audio = new Audio();
-                        audio.srcObject = event.streams[0];
-                        audio.play().catch(e => console.log(e));
-                        console.log('🔊 startCall: создан временный аудиоэлемент');
+                        console.log('⚠️ remoteAudio не найден!');
                     }
                 }
             }
         };
         
-        // Создаём offer
         const offer = await peerConnection.createOffer({
             offerToReceiveAudio: true,
-            offerToReceiveVideo: true  // ВСЕГДА true, даже если video=false, но для видео нужно
+            offerToReceiveVideo: video
         });
         await peerConnection.setLocalDescription(offer);
-        console.log('📞 startCall: offer создан');
         
-        // Отправляем offer
         ws.send(JSON.stringify({ 
             type: 'call_offer', 
             to: userId, 
@@ -647,12 +637,12 @@ async function startCall(userId, video) {
             video: video 
         }));
         
-        showCallUI(video, true);
         showToast(`📞 Звоним ${userId}...`);
         
     } catch (err) {
         showToast('❌ Нет доступа к камере/микрофону');
         console.error('❌ startCall ошибка:', err);
+        endCall();
     }
 }
 
@@ -661,8 +651,11 @@ async function answerCall(from, offer, callId, video) {
     currentCallId = callId;
     
     try {
+        // 1. СНАЧАЛА создаём UI (чтобы remoteAudio существовал)
+        showCallUI(video, false);
+        
         const mediaConstraints = { 
-            audio: true,  // ВСЕГДА ВКЛЮЧАЕМ АУДИО
+            audio: true,
             video: video ? { width: 640, height: 480 } : false 
         };
         
@@ -671,13 +664,11 @@ async function answerCall(from, offer, callId, video) {
         
         peerConnection = new RTCPeerConnection(configuration);
         
-        // Добавляем ВСЕ треки
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
             console.log('📤 answerCall: добавляем трек', track.kind);
         });
         
-        // ICE кандидаты
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 ws.send(JSON.stringify({ 
@@ -686,51 +677,40 @@ async function answerCall(from, offer, callId, video) {
                     candidate: event.candidate, 
                     callId: callId 
                 }));
-                console.log('🔵 answerCall: отправил ICE кандидат');
             }
         };
         
-        // Получаем удалённый поток (от звонящего)
         peerConnection.ontrack = (event) => {
-            console.log('📥 answerCall: получен удалённый трек', event.track.kind, 'streams:', event.streams.length);
-            
+            console.log('📥 answerCall: получен трек', event.track.kind);
             if (event.streams[0]) {
                 if (event.track.kind === 'video') {
                     const remoteVideo = document.getElementById('remoteVideo');
                     if (remoteVideo) {
                         remoteVideo.srcObject = event.streams[0];
                         remoteVideo.play().catch(e => console.log(e));
-                        console.log('🎥 answerCall: видео звонящего подключено');
                     }
                 } else if (event.track.kind === 'audio') {
+                    // remoteAudio УЖЕ существует, потому что showCallUI вызван
                     const remoteAudio = document.getElementById('remoteAudio');
                     if (remoteAudio) {
                         remoteAudio.srcObject = event.streams[0];
                         remoteAudio.play().catch(e => console.log(e));
-                        console.log('🔊 answerCall: аудио звонящего подключено');
+                        console.log('🔊 answerCall: аудио подключено');
                     } else {
-                        const audio = new Audio();
-                        audio.srcObject = event.streams[0];
-                        audio.play().catch(e => console.log(e));
-                        console.log('🔊 answerCall: создан временный аудиоэлемент');
+                        console.log('⚠️ remoteAudio не найден!');
                     }
                 }
             }
         };
         
-        // Устанавливаем удалённое описание (offer от звонящего)
         await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-        console.log('✅ answerCall: remote description установлен');
         
-        // Создаём ответ — ВАЖНО: запрашиваем приём и аудио, и видео
         const answer = await peerConnection.createAnswer({
             offerToReceiveAudio: true,
-            offerToReceiveVideo: true  // ВСЕГДА true
+            offerToReceiveVideo: video
         });
         await peerConnection.setLocalDescription(answer);
-        console.log('✅ answerCall: answer создан');
         
-        // Отправляем ответ
         ws.send(JSON.stringify({ 
             type: 'call_answer', 
             to: from, 
@@ -738,7 +718,6 @@ async function answerCall(from, offer, callId, video) {
             callId: callId 
         }));
         
-        showCallUI(video, false);
         console.log('✅ answerCall: ответ отправлен');
         
     } catch (err) {
@@ -746,7 +725,6 @@ async function answerCall(from, offer, callId, video) {
         endCall();
     }
 }
-
 async function handleAnswer(answer) {
     if (peerConnection && peerConnection.currentRemoteDescription === null) {
         try {
