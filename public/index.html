@@ -7,11 +7,12 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-            height: 100vh;
-            overflow: hidden;
-        }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+    height: 100%;
+    min-height: -webkit-fill-available;
+    overflow: hidden;
+}
         
         /* ТЕМЫ */
         body.light { --bg: #f8fafc; --card-bg: #ffffff; --text: #0f172a; --text-light: #475569; --border: #e2e8f0; --primary: #6366f1; --primary-dark: #4f46e5; --message-in: #f1f5f9; --message-out: #6366f1; --danger: #ef4444; --success: #10b981; --warning: #f59e0b; }
@@ -21,7 +22,7 @@
         body.blue { --bg: #0f2a3a; --card-bg: #1e3a5f; --text: #e0f2fe; --text-light: #bae6fd; --border: #2c6e9e; --primary: #3b82f6; --primary-dark: #2563eb; --message-in: #2c4e6e; --message-out: #3b82f6; }
         
         body { background: var(--bg); transition: all 0.3s ease; }
-        .app { max-width: 800px; margin: 0 auto; height: 100vh; background: var(--card-bg); display: flex; flex-direction: column; position: relative; }
+        .app { max-width: 800px; margin: 0 auto; height: 100dvh; background: var(--card-bg); display: flex; flex-direction: column; position: relative; }
         .header { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: white; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; z-index: 10; }
         .header h1 { font-size: 20px; }
         .user-info { display: flex; align-items: center; gap: 10px; }
@@ -58,7 +59,7 @@
         .reaction-picker { display: flex; gap: 8px; padding: 8px; background: var(--card-bg); border-radius: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); position: absolute; bottom: 100%; right: 0; margin-bottom: 8px; z-index: 100; }
         .reaction-picker span { font-size: 24px; cursor: pointer; padding: 4px; transition: transform 0.1s; }
         .reaction-picker span:hover { transform: scale(1.2); }
-        .input-panel { padding: 12px 16px; background: var(--card-bg); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; flex-shrink: 0; margin-top: auto; }
+        .input-panel { padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: var(--card-bg); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; flex-shrink: 0; margin-top: auto; position: sticky; bottom: 0; z-index: 10; }
         .input-panel input { flex: 1; padding: 12px 18px; border: 1px solid var(--border); border-radius: 30px; font-size: 15px; background: var(--bg); color: var(--text); }
         .send-btn { background: var(--primary); border: none; padding: 12px 24px; border-radius: 30px; color: white; font-weight: 600; cursor: pointer; }
         .action-btn { background: var(--border); border: none; font-size: 20px; cursor: pointer; padding: 8px; border-radius: 50%; width: 42px; height: 42px; }
@@ -1102,6 +1103,20 @@ function showIncomingCall(from, offer, callId, video) {
                 }
             };
         }
+
+        // Фикс для мобильной клавиатуры
+if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    const inputPanel = document.querySelector('.input-panel');
+    const messageInput = document.getElementById('messageInput');
+    
+    if (messageInput) {
+        messageInput.addEventListener('focus', () => {
+            setTimeout(() => {
+                inputPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 300);
+        });
+    }
+}
         
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme) setTheme(savedTheme);
