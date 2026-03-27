@@ -209,12 +209,13 @@
             if (currentTab === 'chats' && currentChat) setTimeout(displayMessages, 50);
         }
         
-        function getAvatarHtml(userId) {
-            const user = contacts.find(c => c.name === userId) || { avatar: null };
-            const avatarUrl = user.avatar;
-            if (avatarUrl) return `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`;
-            return userId.charAt(0).toUpperCase();
-        }
+function getAvatarHtml(userId) {
+    const user = contacts.find(c => c.name === userId) || { avatar: null };
+    const userFromMap = users?.find ? users.find(u => u.name === userId) : null;
+    const avatarUrl = user?.avatar || userFromMap?.avatar;
+    if (avatarUrl) return `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+    return userId.charAt(0).toUpperCase();
+}
         
         function renderChats() {
             if (currentChat) {
@@ -404,45 +405,51 @@
             `;
         }
         
-        function displayMessages() {
-            const container = document.getElementById('messagesArea');
-            if (!container) return;
-            
-            let filtered = [];
-            if (currentChat?.type === 'private') {
-                filtered = allMessages.filter(m => !m.isGroup && 
-                    ((m.from === currentUser && m.to === currentChat.user) ||
-                     (m.from === currentChat.user && m.to === currentUser)));
-            } else if (currentChat?.type === 'group') {
-                filtered = allMessages.filter(m => m.isGroup && m.groupId === currentChat.id);
-            }
-            
-            container.innerHTML = filtered.map(msg => `
-                <div class="message ${msg.from === currentUser ? 'my' : 'other'}" id="msg-${msg.id}">
-                    <div class="message-bubble" style="position:relative;">
-                        ${msg.from !== currentUser ? `<div class="message-sender">${escapeHtml(msg.from)}</div>` : ''}
-                        ${msg.text ? `<div class="message-text">${escapeHtml(msg.text)}</div>` : ''}
-                        ${msg.image ? `<img src="${msg.image}" class="message-image" onclick="window.open('${msg.image}')">` : ''}
-                        <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
-                        ${msg.reactions ? `
-                            <div class="message-reactions">
-                                ${Object.entries(msg.reactions).map(([r, count]) => `<span class="reaction" onclick="addReaction(${msg.id}, '${r}')">${r} ${count}</span>`).join('')}
-                            </div>
-                        ` : ''}
-                        <div class="reaction-picker hidden" id="reactions-${msg.id}">
-                            <span onclick="addReaction(${msg.id}, '👍')">👍</span>
-                            <span onclick="addReaction(${msg.id}, '❤️')">❤️</span>
-                            <span onclick="addReaction(${msg.id}, '😂')">😂</span>
-                            <span onclick="addReaction(${msg.id}, '😮')">😮</span>
-                            <span onclick="addReaction(${msg.id}, '😢')">😢</span>
-                            <span onclick="addReaction(${msg.id}, '👎')">👎</span>
-                        </div>
+function displayMessages() {
+    const container = document.getElementById('messagesArea');
+    if (!container) return;
+    
+    let filtered = [];
+    if (currentChat?.type === 'private') {
+        filtered = allMessages.filter(m => !m.isGroup && 
+            ((m.from === currentUser && m.to === currentChat.user) ||
+             (m.from === currentChat.user && m.to === currentUser)));
+    } else if (currentChat?.type === 'group') {
+        filtered = allMessages.filter(m => m.isGroup && m.groupId === currentChat.id);
+    }
+    
+    container.innerHTML = filtered.map(msg => `
+        <div class="message ${msg.from === currentUser ? 'my' : 'other'}" id="msg-${msg.id}">
+            <div class="message-bubble" style="position:relative;">
+                ${msg.from !== currentUser ? `<div class="message-sender">${escapeHtml(msg.from)}</div>` : ''}
+                ${msg.text ? `<div class="message-text">${escapeHtml(msg.text)}</div>` : ''}
+                ${msg.image ? `<img src="${msg.image}" class="message-image" onclick="window.open('${msg.image}')">` : ''}
+                ${msg.audio ? `
+                    <audio controls style="max-width:200px; margin-top:6px; border-radius:20px;">
+                        <source src="${msg.audio}" type="audio/webm">
+                        Ваш браузер не поддерживает аудио
+                    </audio>
+                ` : ''}
+                <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                ${msg.reactions ? `
+                    <div class="message-reactions">
+                        ${Object.entries(msg.reactions).map(([r, count]) => `<span class="reaction" onclick="addReaction(${msg.id}, '${r}')">${r} ${count}</span>`).join('')}
                     </div>
+                ` : ''}
+                <div class="reaction-picker hidden" id="reactions-${msg.id}">
+                    <span onclick="addReaction(${msg.id}, '👍')">👍</span>
+                    <span onclick="addReaction(${msg.id}, '❤️')">❤️</span>
+                    <span onclick="addReaction(${msg.id}, '😂')">😂</span>
+                    <span onclick="addReaction(${msg.id}, '😮')">😮</span>
+                    <span onclick="addReaction(${msg.id}, '😢')">😢</span>
+                    <span onclick="addReaction(${msg.id}, '👎')">👎</span>
                 </div>
-            `).join('');
-            
-            container.scrollTop = container.scrollHeight;
-        }
+            </div>
+        </div>
+    `).join('');
+    
+    container.scrollTop = container.scrollHeight;
+}
         
         function addReaction(messageId, reaction) {
             ws.send(JSON.stringify({ type: 'reaction', messageId, reaction }));
@@ -469,9 +476,71 @@
             showToast('🎤 Голосовые сообщения будут в следующей версии!');
         }
         
-        function toggleStickers() {
-            document.getElementById('stickerPanel')?.classList.toggle('show');
+function sendVoice() {
+    if (!currentChat) { showToast('❌ Откройте чат'); return; }
+    if (!navigator.mediaDevices) { showToast('❌ Ваш браузер не поддерживает запись'); return; }
+    
+    showToast('🎤 Говорите... Отпустите для отправки');
+    
+    const recordBtn = document.createElement('button');
+    recordBtn.innerText = '🔴 Запись... Отпустите';
+    recordBtn.style.position = 'fixed';
+    recordBtn.style.bottom = '100px';
+    recordBtn.style.left = '50%';
+    recordBtn.style.transform = 'translateX(-50%)';
+    recordBtn.style.background = '#ef4444';
+    recordBtn.style.color = 'white';
+    recordBtn.style.padding = '12px 24px';
+    recordBtn.style.border = 'none';
+    recordBtn.style.borderRadius = '30px';
+    recordBtn.style.zIndex = '2000';
+    document.body.appendChild(recordBtn);
+    
+    let mediaRecorder;
+    let audioChunks = [];
+    
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'voice.webm');
+                
+                fetch('/upload', { method: 'POST', body: formData })
+                    .then(res => res.json())
+                    .then(data => {
+                        const msg = {
+                            type: currentChat.type === 'private' ? 'message' : 'group_message',
+                            text: '🎤 Голосовое',
+                            audio: data.url
+                        };
+                        if (currentChat.type === 'private') msg.to = currentChat.user;
+                        else msg.groupId = currentChat.id;
+                        ws.send(JSON.stringify(msg));
+                        showToast('✅ Голосовое отправлено');
+                    });
+                
+                stream.getTracks().forEach(track => track.stop());
+                recordBtn.remove();
+            };
+            mediaRecorder.start();
+        })
+        .catch(() => showToast('❌ Нет доступа к микрофону'));
+    
+    recordBtn.onmouseup = () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
         }
+    };
+    
+    setTimeout(() => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+    }, 60000);
+}
         
         function showUserQR(username) {
             const modal = document.createElement('div');
@@ -664,54 +733,135 @@
             
             ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', userId: currentUser }));
             
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'history') { allMessages = data.messages; render(); }
-                else if (data.type === 'groups_list') { groups = data.groups; render(); }
-                else if (data.type === 'contacts_list') { contacts = data.contacts; render(); }
-                else if (data.type === 'message' || data.type === 'group_message') {
-                    allMessages.push(data);
-                    render();
-                    if (currentChat) displayMessages();
-                    if (data.from !== currentUser) showToast(`${data.from}: ${data.text?.slice(0, 30) || '📷'}`);
-                }
-                else if (data.type === 'typing') {
-                    const indicator = document.getElementById('typingIndicator');
-                    if (indicator) indicator.innerText = `${data.from} печатает...`;
-                    setTimeout(() => { if (indicator) indicator.innerText = ''; }, 2000);
-                }
-                else if (data.type === 'reaction_update') {
-                    const msg = allMessages.find(m => m.id === data.messageId);
-                    if (msg) { msg.reactions = data.reactions; if (currentChat) displayMessages(); }
-                }
-                else if (data.type === 'avatar_update') {
-                    const user = contacts.find(c => c.name === data.userId);
-                    if (user) user.avatar = data.avatar;
-                    render();
-                }
-                else if (data.type === 'user_online') {
-                    const contact = contacts.find(c => c.name === data.userId);
-                    if (contact) contact.online = true;
-                    render();
-                }
-                else if (data.type === 'user_offline') {
-                    const contact = contacts.find(c => c.name === data.userId);
-                    if (contact) contact.online = false;
-                    render();
-                }
-                else if (data.type === 'join_success') { showToast(`✅ Вы в группе ${data.groupName}`); }
-                else if (data.type === 'join_error') { showToast(`❌ ${data.error}`); }
-                else if (data.type === 'contact_added') { showToast(`➕ ${data.contact} добавлен`); }
-                else if (data.type === 'contact_request') { 
-                    showToast(`📨 ${data.from} хочет добавить вас в друзья`);
-                    if (confirm(`${data.from} хочет стать вашим другом?`)) {
-                        ws.send(JSON.stringify({ type: 'add_contact', contactName: data.from }));
-                    }
-                }
-                else if (data.type === 'error') { showToast(`❌ ${data.error}`); }
-            };
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    
+    if (data.type === 'history') { 
+        allMessages = data.messages; 
+        render(); 
+    }
+    else if (data.type === 'groups_list') { 
+        groups = data.groups; 
+        render(); 
+    }
+    else if (data.type === 'contacts_list') { 
+        contacts = data.contacts; 
+        render(); 
+    }
+    else if (data.type === 'message' || data.type === 'group_message') {
+        allMessages.push(data);
+        render();
+        if (currentChat) displayMessages();
+        if (data.from !== currentUser) {
+            let preview = data.text?.slice(0, 30) || '';
+            if (data.audio) preview = '🎤 Голосовое';
+            if (data.image) preview = '📷 Фото';
+            showToast(`${data.from}: ${preview}`);
         }
-        
+    }
+    else if (data.type === 'typing') {
+        const indicator = document.getElementById('typingIndicator');
+        if (indicator) indicator.innerText = `${data.from} печатает...`;
+        setTimeout(() => { if (indicator) indicator.innerText = ''; }, 2000);
+    }
+    else if (data.type === 'reaction_update') {
+        const msg = allMessages.find(m => m.id === data.messageId);
+        if (msg) { 
+            msg.reactions = data.reactions; 
+            if (currentChat) displayMessages(); 
+        }
+    }
+    else if (data.type === 'avatar_update') {
+        // Обновляем аватар в контактах
+        const contact = contacts.find(c => c.name === data.userId);
+        if (contact) contact.avatar = data.avatar;
+        // Обновляем в списке пользователей
+        const userInGroups = groups.flatMap(g => g.members).find(m => m === data.userId);
+        render();
+    }
+    else if (data.type === 'online_list') {
+        // Получаем список всех онлайн пользователей
+        data.users.forEach(userId => {
+            if (userId === currentUser) return;
+            const contact = contacts.find(c => c.name === userId);
+            if (contact) {
+                contact.online = true;
+            } else {
+                contacts.push({ name: userId, online: true, avatar: null });
+            }
+        });
+        render();
+    }
+    else if (data.type === 'user_online') {
+        // Пользователь зашёл в сеть
+        const contact = contacts.find(c => c.name === data.userId);
+        if (contact) {
+            contact.online = true;
+        } else if (data.userId !== currentUser) {
+            contacts.push({ name: data.userId, online: true, avatar: null });
+        }
+        render();
+        if (data.userId !== currentUser) {
+            showToast(`🟢 ${data.userId} в сети`);
+        }
+    }
+    else if (data.type === 'user_offline') {
+        // Пользователь вышел
+        const contact = contacts.find(c => c.name === data.userId);
+        if (contact) {
+            contact.online = false;
+            render();
+        }
+    }
+    else if (data.type === 'join_success') { 
+        showToast(`✅ Вы в группе ${data.groupName}`); 
+    }
+    else if (data.type === 'join_error') { 
+        showToast(`❌ ${data.error}`); 
+    }
+    else if (data.type === 'contact_added') { 
+        showToast(`➕ ${data.contact} добавлен в друзья`); 
+        // Обновляем список контактов
+        ws.send(JSON.stringify({ type: 'auth', userId: currentUser }));
+    }
+    else if (data.type === 'contact_request') { 
+        showToast(`📨 ${data.from} хочет добавить вас в друзья`);
+        if (confirm(`${data.from} хочет стать вашим другом? Принять?`)) {
+            ws.send(JSON.stringify({ type: 'add_contact', contactName: data.from }));
+        }
+    }
+    else if (data.type === 'add_contact_error') { 
+        showToast(`❌ ${data.error}`); 
+    }
+    else if (data.type === 'auth_error') { 
+        showToast(`❌ ${data.error}`); 
+        if (data.error.includes('имя')) {
+            currentUser = '';
+            localStorage.removeItem('messenger_user');
+            render();
+        }
+    }
+    else if (data.type === 'error') { 
+        showToast(`❌ ${data.error}`); 
+    }
+    else if (data.type === 'group_created') { 
+        showToast(`✅ Группа создана`); 
+    }
+    else if (data.type === 'left_group') { 
+        showToast(`🚪 Вы вышли из группы`); 
+        if (currentChat?.type === 'group' && currentChat.id === data.groupId) {
+            closeChat();
+        }
+        render();
+    }
+    else if (data.type === 'group_deleted') { 
+        showToast(`🗑️ Группа удалена`); 
+        if (currentChat?.type === 'group' && currentChat.id === data.groupId) {
+            closeChat();
+        }
+        render();
+    }
+};
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme) setTheme(savedTheme);
         else setTheme('light');
