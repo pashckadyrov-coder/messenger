@@ -807,12 +807,13 @@ function showCallUI(video, isCaller) {
             <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
         `;
     } else {
+        // АУДИОЗВОНОК — добавляем скрытый audio элемент
         modal.innerHTML = `
             <div style="text-align:center;margin-bottom:20px;">
                 <div style="font-size:80px;margin-bottom:20px;">🎤</div>
                 <h2 style="color:white;">Аудиозвонок</h2>
-                <audio id="remoteAudio" autoplay style="display:block;margin-top:20px;"></audio>
-                <div style="margin-top:20px;color:#aaa;">Говорите...</div>
+                <audio id="remoteAudio" autoplay style="display:none;"></audio>
+                <div style="margin-top:20px;color:#aaa;">Говорите... Звук собеседника будет здесь</div>
             </div>
             <button onclick="endCall()" style="background:#ef4444;border:none;padding:16px 32px;border-radius:50px;color:white;font-size:18px;cursor:pointer;">🔴 Завершить</button>
         `;
@@ -823,34 +824,13 @@ function showCallUI(video, isCaller) {
     if (localVideo && localStream) {
         localVideo.srcObject = localStream;
         localVideo.play().catch(e => console.log(e));
-        console.log('🎥 showCallUI: локальное видео подключено');
+        console.log('🎥 showCallUI: локальное видео/аудио подключено');
     }
-}
-
-function showIncomingCall(from, offer, callId, video) {
-    const modal = document.createElement('div');
-    modal.id = 'callModal';
-    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:3000;';
     
-    modal.innerHTML = `
-        <h2 style="color:white;margin-bottom:20px;">📞 ${from} ${video ? 'видеозвонит' : 'звонит'}</h2>
-        <div style="display:flex;gap:20px;">
-            <button onclick="window._acceptCall()" style="background:#10b981;border:none;width:70px;height:70px;border-radius:50%;font-size:30px;cursor:pointer;">✅</button>
-            <button onclick="window._rejectCall()" style="background:#ef4444;border:none;width:70px;height:70px;border-radius:50%;font-size:30px;cursor:pointer;">❌</button>
-        </div>
-    `;
-    document.body.appendChild(modal);
-    
-    window._acceptCall = () => { 
-        modal.remove(); 
-        answerCall(from, offer, callId, video); 
-    };
-    
-    window._rejectCall = () => { 
-        modal.remove(); 
-        ws.send(JSON.stringify({ type: 'end_call', to: from })); 
-        showToast('📞 Звонок отклонён'); 
-    };
+    // ДЛЯ АУДИОЗВОНКА: если нет видео, но нужно показать что аудио готово
+    if (!video) {
+        console.log('🎤 Аудиозвонок: remoteAudio элемент создан');
+    }
 }
 function showIncomingCall(from, offer, callId, video) {
     const modal = document.createElement('div');
