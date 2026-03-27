@@ -634,6 +634,68 @@ async function startCall(userId, video) {
         console.error(err);
     }
 }
+
+        async function answerCall(from, offer, callId, video) {
+    currentCallWith = from;
+    currentCallId = callId;
+    
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: true,
+            video: video ? { width: 640, height: 480 } : false 
+        });
+        
+        peerConnection = new RTCPeerConnection(configuration);
+        
+        localStream.getTracks().forEach(track => {
+            peerConnection.addTrack(track, localStream);
+            console.log('Добавлен трек:', track.kind);
+        });
+        
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                ws.send(JSON.stringify({ 
+                    type: 'ice_candidate', 
+                    to: from, 
+                    candidate: event.candidate, 
+                    callId: callId 
+                }));
+            }
+        };
+        
+        peerConnection.ontrack = (event) => {
+            console.log('Получен трек:', event.track.kind);
+            if (event.streams[0]) {
+                const remoteVideo = document.getElementById('remoteVideo');
+                if (remoteVideo && event.track.kind === 'video') {
+                    remoteVideo.srcObject = event.streams[0];
+                    remoteVideo.play().catch(e => console.log(e));
+                }
+            }
+        };
+        
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        
+        const answer = await peerConnection.createAnswer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: video
+        });
+        await peerConnection.setLocalDescription(answer);
+        
+        ws.send(JSON.stringify({ 
+            type: 'call_answer', 
+            to: from, 
+            answer: peerConnection.localDescription, 
+            callId: callId 
+        }));
+        
+        showCallUI(video, false);
+        
+    } catch (err) {
+        console.error(err);
+        endCall();
+    }
+}
         
 async function handleAnswer(answer) {
     if (peerConnection && peerConnection.currentRemoteDescription === null) {
