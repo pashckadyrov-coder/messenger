@@ -794,13 +794,37 @@
             window._rejectCall = () => { modal.remove(); ws.send(JSON.stringify({ type: 'end_call', to: from })); showToast('Звонок отклонён'); };
         }
         
-        function login() {
-            const name = document.getElementById('loginName')?.value.trim();
-            if (!name) return alert('Введите имя');
-            currentUser = name;
-            localStorage.setItem('messenger_user', name);
-            connectWebSocket();
-        }
+function login() {
+    const name = document.getElementById('loginName').value.trim();
+    
+    // Список запрещённых слов (маты и оскорбления)
+    const badWords = [
+        'далбаеб', 'далбаёб', 'далбайоб', 'далбайоп', 'далбоеб',
+        'хуй', 'хуи', 'хуе', 'хую', 'хуя', 'пизда', 'пиздец', 'пизде',
+        'бля', 'блять', 'блядь', 'ебать', 'ебаный', 'ебанат',
+        'говно', 'гнида', 'сука', 'сучка', 'пидор', 'пидорас',
+        'мудак', 'мразь', 'лох', 'лошара', 'чмо', 'шлюха',
+        'уебан', 'уебок', 'уебище', 'залупа', 'хуесос',
+        'долбоеб', 'долбаеб', 'дебил', 'даун', 'идиот',
+        'кретин', 'олень', 'баран', 'овца', 'козел'
+    ];
+    
+    // Проверка на маты
+    if (badWords.some(word => name.toLowerCase().includes(word))) {
+        showToast('❌ Выберите нормальное имя!');
+        document.getElementById('loginName').value = '';
+        return;
+    }
+    
+    if (!name) {
+        showToast('Введите имя');
+        return;
+    }
+    
+    currentUser = name;
+    localStorage.setItem('messenger_user', name);
+    connectWebSocket();
+}
         
         function connectWebSocket() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
