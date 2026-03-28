@@ -355,7 +355,9 @@ wss.on('connection', (ws) => {
                 }
             }
             
-        } catch(e) { console.error('WebSocket error:', e); }
+        } catch(e) { 
+            console.error('WebSocket error:', e); 
+        }
     });
     
     ws.on('close', () => {
@@ -364,4 +366,11 @@ wss.on('connection', (ws) => {
             if (user) user.online = false;
             clients.delete(currentUser);
             broadcast({ type: 'user_offline', userId: currentUser });
-            console.log(`
+            console.log(`❌ ${currentUser} вышел`);
+        }
+    });
+});
+
+server.listen(PORT, () => {
+    console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
+});
