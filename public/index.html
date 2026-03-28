@@ -255,8 +255,9 @@
                             <button class="send-btn" onclick="sendMessage()">→</button>
                         </div>
                         <div id="stickerPanel" class="sticker-panel">
-                            <div class="sticker-grid">
+                            <div class="sticker-grid"> 
                                 ${['😀','😂','🥰','😎','🔥','❤️','👍','🎉','😭','😡','🤔','👀','💀','✨','🍿','🎮','🐱','🐶','🍕','☕'].map(s => `<span class="sticker" onclick="sendSticker('${s}')">${s}</span>`).join('')}
+                            <button class="action-btn" onclick="openStickerCreator()">🎨</button>
                             </div>
                         </div>
                     </div>
@@ -584,6 +585,80 @@
             }));
             showToast(`📨 Приглашение отправлено ${userName}`);
         }
+        let customStickers = JSON.parse(localStorage.getItem('customStickers') || '[]');
+
+function openStickerCreator() {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <h3>🎨 Создать стикер</h3>
+            <input type="text" id="stickerEmoji" placeholder="😀 или текст" maxlength="10">
+            <input type="file" id="stickerImage" accept="image/*" style="margin:10px 0;">
+            <button onclick="addCustomSticker()">➕ Добавить</button>
+            <hr>
+            <div id="customStickersList" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;"></div>
+            <button class="send-btn" onclick="this.closest('.modal').remove()">Закрыть</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    renderCustomStickersList();
+}
+
+function renderCustomStickersList() {
+    const container = document.getElementById('customStickersList');
+    if (!container) return;
+    container.innerHTML = customStickers.map((s, i) => `
+        <div style="text-align:center;">
+            ${s.image ? `<img src="${s.image}" style="width:50px;height:50px;cursor:pointer;" onclick="sendCustomSticker(${i})">` : 
+            `<span style="font-size:40px;cursor:pointer;" onclick="sendCustomSticker(${i})">${s.emoji}</span>`}
+            <button onclick="deleteCustomSticker(${i})" style="display:block;font-size:10px;">🗑️</button>
+        </div>
+    `).join('');
+}
+
+function addCustomSticker() {
+    const emoji = document.getElementById('stickerEmoji')?.value;
+    const file = document.getElementById('stickerImage')?.files[0];
+    
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            customStickers.push({ image: e.target.result, emoji: null });
+            localStorage.setItem('customStickers', JSON.stringify(customStickers));
+            renderCustomStickersList();
+            showToast('✅ Стикер добавлен');
+        };
+        reader.readAsDataURL(file);
+    } else if (emoji) {
+        customStickers.push({ emoji: emoji, image: null });
+        localStorage.setItem('customStickers', JSON.stringify(customStickers));
+        renderCustomStickersList();
+        showToast('✅ Стикер добавлен');
+    }
+}
+
+function deleteCustomSticker(index) {
+    customStickers.splice(index, 1);
+    localStorage.setItem('customStickers', JSON.stringify(customStickers));
+    renderCustomStickersList();
+}
+
+function sendCustomSticker(index) {
+    const sticker = customStickers[index];
+    if (!currentChat) return;
+    const msg = { 
+        type: currentChat.type === 'private' ? 'message' : 'group_message', 
+        text: sticker.emoji || '🖼️',
+        image: sticker.image || null,
+        isSticker: true
+    };
+    if (currentChat.type === 'private') msg.to = currentChat.user;
+    else msg.groupId = currentChat.id;
+    ws.send(JSON.stringify(msg));
+    document.querySelector('.modal')?.remove();
+    showConfetti();
+}
         
         async function startCall(userId, video) {
             if (!userId) { showToast('❌ Выберите контакт'); return; }
