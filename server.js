@@ -15,10 +15,8 @@ let users = new Map();
 let groups = new Map();
 let messages = [];
 
-// Файл для сохранения данных
 const DATA_FILE = './data.json';
 
-// Загрузка данных из файла
 function loadData() {
     try {
         if (fs.existsSync(DATA_FILE)) {
@@ -31,7 +29,6 @@ function loadData() {
     } catch (e) { console.error('Ошибка загрузки:', e); }
 }
 
-// Сохранение данных в файл
 function saveData() {
     try {
         const data = {
@@ -44,7 +41,6 @@ function saveData() {
     } catch (e) { console.error('Ошибка сохранения:', e); }
 }
 
-// Создаём папки
 if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 if (!fs.existsSync('./public')) fs.mkdirSync('./public');
 
@@ -153,7 +149,34 @@ wss.on('connection', (ws) => {
                 const onlineUsers = Array.from(clients.keys());
                 ws.send(JSON.stringify({ type: 'online_list', users: onlineUsers }));
                 
-                console.log(`✅ ${currentUser} вошёл, онлайн: ${onlineUsers.length}`);
+                console.log(`✅ ${currentUser} вошёл`);
+            }
+            
+            // ========== УДАЛЕНИЕ СООБЩЕНИЯ ==========
+            else if (data.type === 'delete_message') {
+                const msgIndex = messages.findIndex(m => m.id === data.messageId);
+                if (msgIndex !== -1) {
+                    const msg = messages[msgIndex];
+                    // Только автор или владелец группы может удалить
+                    if (msg.from === currentUser || (msg.isGroup && groups.get(msg.groupId)?.owner === currentUser)) {
+                        messages.splice(msgIndex, 1);
+                        saveData();
+                        // Уведомить всех участников чата
+                        if (msg.isGroup) {
+                            const group = groups.get(msg.groupId);
+                            group?.members.forEach(m => {
+                                const mWs = clients.get(m);
+                                if (mWs) mWs.send(JSON.stringify({ type: 'message_deleted', messageId: data.messageId }));
+                            });
+                        } else {
+                            [msg.from, msg.to].forEach(u => {
+                                const uWs = clients.get(u);
+                                if (uWs) uWs.send(JSON.stringify({ type: 'message_deleted', messageId: data.messageId }));
+                            });
+                        }
+                        ws.send(JSON.stringify({ type: 'delete_success' }));
+                    }
+                }
             }
             
             else if (data.type === 'message') {
@@ -412,10 +435,7 @@ wss.on('connection', (ws) => {
     });
 });
 
-// Загружаем данные при старте
 loadData();
-
-// Сохраняем данные каждые 10 секунд (на всякий случай)
 setInterval(saveData, 10000);
 
 server.listen(PORT, () => {
