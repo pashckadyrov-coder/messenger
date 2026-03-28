@@ -243,7 +243,10 @@
                             ${currentChat.type === 'private' ? `
                                 <button class="call-btn" onclick="startCall('${currentChat.user}', false)">🎤</button>
                                 <button class="call-btn" onclick="startCall('${currentChat.user}', true)">📹</button>
-                            ` : ''}
+                                ${currentChat.type === 'group' ? `
+    <button class="call-btn" onclick="startGroupCall('${currentChat.id}', false)">🎤</button>
+    <button class="call-btn" onclick="startGroupCall('${currentChat.id}', true)">📹</button>
+` : ''}
                         </div>
                         <div id="typingIndicator" class="typing-indicator"></div>
                         <div class="messages-area" id="messagesArea"></div>
