@@ -57,6 +57,9 @@ app.post('/upload-avatar', upload.single('avatar'), (req, res) => {
     if (!req.file || !userId) return res.status(400).json({ error: 'Ошибка' });
     const user = users.get(userId);
     if (user) {
+        if (user.avatar && user.avatar !== req.file.filename) {
+            try { fs.unlinkSync('.' + user.avatar); } catch(e) {}
+        }
         user.avatar = `/uploads/${req.file.filename}`;
         users.set(userId, user);
         broadcast({ type: 'avatar_update', userId, avatar: user.avatar });
@@ -99,28 +102,22 @@ wss.on('connection', (ws) => {
                 }
                 clients.set(currentUser, ws);
                 
-                // История сообщений
                 const userMessages = messages.filter(m => 
                     (m.from === currentUser || m.to === currentUser) ||
                     (m.isGroup && groups.get(m.groupId)?.members?.includes(currentUser))
                 );
                 ws.send(JSON.stringify({ type: 'history', messages: userMessages }));
                 
-                // Группы
-                const userGroups = Array.from(groups.values()).filter(g => g.members.includes(currentUser));
+                const userGroups = Array.from(groups.values()).filter(g => g.members && g.members.includes(currentUser));
                 ws.send(JSON.stringify({ type: 'groups_list', groups: userGroups }));
                 
-                // Контакты
                 const contactsList = user.contacts.map(c => {
                     const u = users.get(c);
                     return u ? { name: u.name, online: u.online || false, avatar: u.avatar } : null;
                 }).filter(c => c);
                 ws.send(JSON.stringify({ type: 'contacts_list', contacts: contactsList }));
                 
-                // ОТПРАВЛЯЕМ ОНЛАЙН СТАТУС ВСЕМ
                 broadcast({ type: 'user_online', userId: currentUser });
-                
-                // ОТПРАВЛЯЕМ НОВОМУ ПОЛЬЗОВАТЕЛЮ СПИСОК ОНЛАЙН
                 const onlineUsers = Array.from(clients.keys());
                 ws.send(JSON.stringify({ type: 'online_list', users: onlineUsers }));
                 
@@ -150,7 +147,7 @@ wss.on('connection', (ws) => {
             
             else if (data.type === 'group_message') {
                 const group = groups.get(data.groupId);
-                if (!group || !group.members.includes(currentUser)) return;
+                if (!group || !group.members || !group.members.includes(currentUser)) return;
                 if (containsBadWords(data.text)) {
                     ws.send(JSON.stringify({ type: 'error', error: 'Сообщение содержит запрещённые слова' }));
                     return;
@@ -187,6 +184,49 @@ wss.on('connection', (ws) => {
                 broadcast({ type: 'groups_list', groups: Array.from(groups.values()) });
             }
             
+            else if (data.type === 'invite_to_group') {
+                const group = groups.get(data.groupId);
+                if (!group) {
+                    ws.send(JSON.stringify({ type: 'error', error: 'Группа не найдена' }));
+                    return;
+                }
+                if (!group.members.includes(currentUser)) {
+                    ws.send(JSON.stringify({ type: 'error', error: 'Вы не участник группы' }));
+                    return;
+                }
+                const invitedUser = users.get(data.userToInvite);
+                if (!invitedUser) {
+                    ws.send(JSON.stringify({ type: 'error', error: 'Пользователь не найден' }));
+                    return;
+                }
+                const invitedWs = clients.get(data.userToInvite);
+                if (invitedWs) {
+                    invitedWs.send(JSON.stringify({
+                        type: 'group_invite',
+                        from: currentUser,
+                        groupId: group.id,
+                        groupName: group.name
+                    }));
+                    ws.send(JSON.stringify({ type: 'invite_sent', to: data.userToInvite }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'error', error: 'Пользователь не в сети' }));
+                }
+            }
+            
+            else if (data.type === 'accept_group_invite') {
+                const group = groups.get(data.groupId);
+                if (!group) {
+                    ws.send(JSON.stringify({ type: 'error', error: 'Группа не найдена' }));
+                    return;
+                }
+                if (!group.members.includes(currentUser)) {
+                    group.members.push(currentUser);
+                    groups.set(data.groupId, group);
+                    broadcast({ type: 'groups_list', groups: Array.from(groups.values()) });
+                    ws.send(JSON.stringify({ type: 'group_joined', groupName: group.name }));
+                }
+            }
+            
             else if (data.type === 'join_group') {
                 const group = groups.get(data.groupId);
                 if (!group) { ws.send(JSON.stringify({ type: 'join_error', error: 'Группа не найдена' })); return; }
@@ -199,15 +239,19 @@ wss.on('connection', (ws) => {
             
             else if (data.type === 'leave_group') {
                 const group = groups.get(data.groupId);
-                if (group && group.members.includes(currentUser)) {
+                if (group && group.members && group.members.includes(currentUser)) {
                     group.members = group.members.filter(m => m !== currentUser);
                     if (group.members.length === 0) groups.delete(data.groupId);
+                    ws.send(JSON.stringify({ type: 'left_group', groupId: data.groupId }));
                 }
             }
             
             else if (data.type === 'delete_group') {
                 const group = groups.get(data.groupId);
-                if (group && group.owner === currentUser) groups.delete(data.groupId);
+                if (group && group.owner === currentUser) {
+                    groups.delete(data.groupId);
+                    broadcast({ type: 'group_deleted', groupId: data.groupId });
+                }
             }
             
             else if (data.type === 'add_contact') {
@@ -258,9 +302,6 @@ wss.on('connection', (ws) => {
                         callId: data.callId,
                         video: data.video
                     }));
-                    console.log(`📞 Звонок от ${currentUser} к ${data.to}`);
-                } else {
-                    ws.send(JSON.stringify({ type: 'error', error: 'Пользователь не в сети' }));
                 }
             }
             
@@ -293,12 +334,9 @@ wss.on('connection', (ws) => {
                 if (targetWs && targetWs.readyState === WebSocket.OPEN) {
                     targetWs.send(JSON.stringify({ type: 'end_call', from: currentUser }));
                 }
-                console.log(`📞 Звонок завершён: ${currentUser} -> ${data.to}`);
             }
             
-        } catch(e) { 
-            console.error('WebSocket error:', e); 
-        }
+        } catch(e) { console.error('WebSocket error:', e); }
     });
     
     ws.on('close', () => {
@@ -313,5 +351,5 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`🚀 Сервер на http://localhost:${PORT}`);
+    console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
 });
