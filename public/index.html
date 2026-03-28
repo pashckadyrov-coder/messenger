@@ -149,14 +149,14 @@
         }
         
         function displayMessages() {
-            const c = document.getElementById('messagesArea');
-            if(!c) return;
-            let f = [];
-            if(currentChat?.type==='private') f = allMessages.filter(m=>!m.isGroup&&((m.from===currentUser&&m.to===currentChat.user)||(m.from===currentChat.user&&m.to===currentUser)));
-            else if(currentChat?.type==='group') f = allMessages.filter(m=>m.isGroup&&m.groupId===currentChat.id);
-            c.innerHTML = f.map(msg=>`<div class="message ${msg.from===currentUser?'my':'other'}" id="msg-${msg.id}"><div class="message-bubble">${msg.from!==currentUser?`<div class="message-sender">${escapeHtml(msg.from)}</div>`:''}${msg.text?`<div class="message-text">${escapeHtml(msg.text)}</div>`:''}${msg.image?`<img src="${msg.image}" class="message-image" onclick="window.open('${msg.image}')">`:''}${msg.audio?`<audio controls style="max-width:160px;"><source src="${msg.audio}"></audio>`:''}<div class="message-time">${new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>${msg.from===currentUser?`<span class="delete-msg" onclick="deleteMessage(${msg.id})">🗑️</span>`:''}</div>`).join('');
-            c.scrollTop = c.scrollHeight;
-        }
+    const c = document.getElementById('messagesArea');
+    if(!c) return;
+    let f = [];
+    if(currentChat?.type==='private') f = allMessages.filter(m=>!m.isGroup&&((m.from===currentUser&&m.to===currentChat.user)||(m.from===currentChat.user&&m.to===currentUser)));
+    else if(currentChat?.type==='group') f = allMessages.filter(m=>m.isGroup&&m.groupId===currentChat.id);
+    c.innerHTML = f.map(msg=>`<div class="message ${msg.from===currentUser?'my':'other'}" id="msg-${msg.id}"><div class="message-bubble">${msg.from!==currentUser?`<div class="message-sender">${escapeHtml(msg.from)}</div>`:''}${msg.text?`<div class="message-text">${escapeHtml(msg.text)}</div>`:''}${msg.image?`<img src="${msg.image}" class="message-image" onclick="window.open('${msg.image}')">`:''}${msg.audio?`<audio controls style="max-width:160px; margin-top:6px; border-radius:16px;"><source src="${msg.audio}" type="audio/webm"></audio>`:''}<div class="message-time">${new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>${msg.from===currentUser?`<span class="delete-msg" onclick="deleteMessage(${msg.id})">🗑️</span>`:''}</div>`).join('');
+    c.scrollTop = c.scrollHeight;
+}
         
         function sendSticker(s) { if(!currentChat) return; const msg = { type: currentChat.type==='private'?'message':'group_message', text: s }; if(currentChat.type==='private') msg.to = currentChat.user; else msg.groupId = currentChat.id; ws.send(JSON.stringify(msg)); showConfetti(); document.getElementById('stickerPanel')?.classList.remove('show'); }
         function toggleStickers() { document.getElementById('stickerPanel')?.classList.toggle('show'); }
@@ -199,7 +199,71 @@
         function showUserQR(u){ const m=document.createElement('div'); m.className='modal'; m.innerHTML=`<div class="modal-content"><h3>📱 QR-КОД</h3><div class="qr-code">${escapeHtml(u)}</div><button class="send-btn" onclick="this.closest('.modal').remove()">Закрыть</button></div>`; document.body.appendChild(m); }
         function showMyQR(){ showUserQR(currentUser); }
         function searchMessages(q){ searchQuery=q; render(); }
-        function sendVoice() { showToast('🎤 Голосовые сообщения скоро!'); }
+        function sendVoice() {
+    if (!currentChat) { showToast('❌ Откройте чат'); return; }
+    if (!navigator.mediaDevices) { showToast('❌ Ваш браузер не поддерживает запись'); return; }
+    
+    showToast('🎤 Говорите... Отпустите для отправки');
+    
+    const recordBtn = document.createElement('button');
+    recordBtn.innerText = '🔴 Запись... Отпустите';
+    recordBtn.style.position = 'fixed';
+    recordBtn.style.bottom = '120px';
+    recordBtn.style.left = '50%';
+    recordBtn.style.transform = 'translateX(-50%)';
+    recordBtn.style.background = '#ef4444';
+    recordBtn.style.color = 'white';
+    recordBtn.style.padding = '14px 28px';
+    recordBtn.style.border = 'none';
+    recordBtn.style.borderRadius = '40px';
+    recordBtn.style.zIndex = '2000';
+    document.body.appendChild(recordBtn);
+    
+    let mediaRecorder;
+    let audioChunks = [];
+    
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'voice.webm');
+                
+                fetch('/upload', { method: 'POST', body: formData })
+                    .then(res => res.json())
+                    .then(data => {
+                        const msg = {
+                            type: currentChat.type === 'private' ? 'message' : 'group_message',
+                            text: '🎤 Голосовое',
+                            audio: data.url
+                        };
+                        if (currentChat.type === 'private') msg.to = currentChat.user;
+                        else msg.groupId = currentChat.id;
+                        ws.send(JSON.stringify(msg));
+                        showToast('✅ Голосовое отправлено');
+                    });
+                
+                stream.getTracks().forEach(track => track.stop());
+                recordBtn.remove();
+            };
+            mediaRecorder.start();
+        })
+        .catch(() => showToast('❌ Нет доступа к микрофону'));
+    
+    recordBtn.onmouseup = () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+    };
+    
+    recordBtn.ontouchend = () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+    };
+}
         
         function connectWebSocket(){
             const proto=location.protocol==='https:'?'wss:':'ws:';
