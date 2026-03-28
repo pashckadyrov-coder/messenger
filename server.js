@@ -144,26 +144,6 @@ wss.on('connection', (ws) => {
                 if (recipientWs) recipientWs.send(JSON.stringify(msg));
                 ws.send(JSON.stringify(msg));
             }
-                
-else if (data.type === 'group_call_offer') {
-    const group = groups.get(data.groupId);
-    if (!group) return;
-    group.members.forEach(memberId => {
-        if (memberId !== currentUser) {
-            const memberWs = clients.get(memberId);
-            if (memberWs) {
-                memberWs.send(JSON.stringify({
-                    type: 'group_call_offer',
-                    from: currentUser,
-                    groupId: data.groupId,
-                    offer: data.offer,
-                    callId: data.callId,
-                    video: data.video
-                }));
-            }
-        }
-    });
-}
             
             else if (data.type === 'group_message') {
                 const group = groups.get(data.groupId);
@@ -187,6 +167,26 @@ else if (data.type === 'group_call_offer') {
                 group.members.forEach(memberId => {
                     const memberWs = clients.get(memberId);
                     if (memberWs) memberWs.send(JSON.stringify(msg));
+                });
+            }
+            
+            else if (data.type === 'group_call_offer') {
+                const group = groups.get(data.groupId);
+                if (!group) return;
+                group.members.forEach(memberId => {
+                    if (memberId !== currentUser) {
+                        const memberWs = clients.get(memberId);
+                        if (memberWs) {
+                            memberWs.send(JSON.stringify({
+                                type: 'group_call_offer',
+                                from: currentUser,
+                                groupId: data.groupId,
+                                offer: data.offer,
+                                callId: data.callId,
+                                video: data.video
+                            }));
+                        }
+                    }
                 });
             }
             
@@ -311,7 +311,6 @@ else if (data.type === 'group_call_offer') {
                 }
             }
             
-            // ========== ВЕБРТС ЗВОНКИ ==========
             else if (data.type === 'call_offer') {
                 const targetWs = clients.get(data.to);
                 if (targetWs && targetWs.readyState === WebSocket.OPEN) {
@@ -365,11 +364,4 @@ else if (data.type === 'group_call_offer') {
             if (user) user.online = false;
             clients.delete(currentUser);
             broadcast({ type: 'user_offline', userId: currentUser });
-            console.log(`❌ ${currentUser} вышел`);
-        }
-    });
-});
-
-server.listen(PORT, () => {
-    console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
-});
+            console.log(`
