@@ -234,38 +234,38 @@
         
         function renderChats() {
             if (currentChat) {
-                return `
-                    <div class="messages-container">
-                        <div class="messages-header">
-                            <button class="back-btn" onclick="closeChat()">←</button>
-                            <h3>${isPinned(currentChat) ? '📌 ' : ''}${currentChat.type === 'group' ? '#' : '💬'} ${escapeHtml(currentChat.type === 'group' ? currentChat.name : currentChat.user)}</h3>
-                            <button class="icon-btn" onclick="togglePin(currentChat)">📌</button>
-                            ${currentChat.type === 'private' ? `
-                                <button class="call-btn" onclick="startCall('${currentChat.user}', false)">🎤</button>
-                                <button class="call-btn" onclick="startCall('${currentChat.user}', true)">📹</button>
-                                ${currentChat.type === 'group' ? `
-    <button class="call-btn" onclick="startGroupCall('${currentChat.id}', false)">🎤</button>
-    <button class="call-btn" onclick="startGroupCall('${currentChat.id}', true)">📹</button>
-` : ''}
-                        </div>
-                        <div id="typingIndicator" class="typing-indicator"></div>
-                        <div class="messages-area" id="messagesArea"></div>
-                        <div class="input-panel">
-                            <button class="action-btn" onclick="attachImage()">📎</button>
-                            <button class="action-btn" onclick="toggleStickers()">😊</button>
-                            <button class="action-btn" onclick="sendVoice()">🎤</button>
-                            <input type="text" id="messageInput" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') sendMessage()" oninput="onTyping()">
-                            <button class="send-btn" onclick="sendMessage()">→</button>
-                        </div>
-                        <div id="stickerPanel" class="sticker-panel">
-                            <div class="sticker-grid"> 
-                                ${['😀','😂','🥰','😎','🔥','❤️','👍','🎉','😭','😡','🤔','👀','💀','✨','🍿','🎮','🐱','🐶','🍕','☕'].map(s => `<span class="sticker" onclick="sendSticker('${s}')">${s}</span>`).join('')}
-                            <button class="action-btn" onclick="openStickerCreator()">🎨</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
+    return `
+        <div class="messages-container">
+            <div class="messages-header">
+                <button class="back-btn" onclick="closeChat()">←</button>
+                <h3>${isPinned(currentChat) ? '📌 ' : ''}${currentChat.type === 'group' ? '#' : '💬'} ${escapeHtml(currentChat.type === 'group' ? currentChat.name : currentChat.user)}</h3>
+                <button class="icon-btn" onclick="togglePin(currentChat)">📌</button>
+                ${currentChat.type === 'private' ? `
+                    <button class="call-btn" onclick="startCall('${currentChat.user}', false)">🎤</button>
+                    <button class="call-btn" onclick="startCall('${currentChat.user}', true)">📹</button>
+                ` : `
+                    <button class="call-btn" onclick="startGroupCall('${currentChat.id}', false)">🎤</button>
+                    <button class="call-btn" onclick="startGroupCall('${currentChat.id}', true)">📹</button>
+                `}
+            </div>
+            <div id="typingIndicator" class="typing-indicator"></div>
+            <div class="messages-area" id="messagesArea"></div>
+            <div class="input-panel">
+                <button class="action-btn" onclick="attachImage()">📎</button>
+                <button class="action-btn" onclick="toggleStickers()">😊</button>
+                <button class="action-btn" onclick="sendVoice()">🎤</button>
+                <button class="action-btn" onclick="openStickerCreator()">🎨</button>
+                <input type="text" id="messageInput" placeholder="Сообщение..." onkeypress="if(event.key==='Enter') sendMessage()" oninput="onTyping()">
+                <button class="send-btn" onclick="sendMessage()">→</button>
+            </div>
+            <div id="stickerPanel" class="sticker-panel">
+                <div class="sticker-grid">
+                    ${['😀','😂','🥰','😎','🔥','❤️','👍','🎉','😭','😡','🤔','👀','💀','✨','🍿','🎮','🐱','🐶','🍕','☕'].map(s => `<span class="sticker" onclick="sendSticker('${s}')">${s}</span>`).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
             
             let privateChats = [];
             allMessages.forEach(msg => {
