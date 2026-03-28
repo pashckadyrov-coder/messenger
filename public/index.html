@@ -735,6 +735,31 @@ function sendCustomSticker(index) {
                 endCall();
             }
         }
+
+        let groupCallMembers = [];
+
+async function startGroupCall(groupId, video) {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: video });
+        currentCallId = Date.now().toString();
+        
+        const offer = await peerConnection.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: video });
+        await peerConnection.setLocalDescription(offer);
+        
+        ws.send(JSON.stringify({
+            type: 'group_call_offer',
+            groupId: groupId,
+            offer: peerConnection.localDescription,
+            callId: currentCallId,
+            video: video
+        }));
+        
+        showCallUI(video, true);
+        showToast(`📞 Групповой звонок начат`);
+    } catch (err) {
+        showToast('❌ Нет доступа к камере/микрофону');
+    }
+}
         
         async function answerCall(from, offer, callId, video) {
             currentCallWith = from;
