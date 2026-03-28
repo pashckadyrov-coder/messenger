@@ -11,10 +11,40 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
 const clients = new Map();
-const users = new Map();
-const groups = new Map();
-const messages = [];
+let users = new Map();
+let groups = new Map();
+let messages = [];
 
+// Файл для сохранения данных
+const DATA_FILE = './data.json';
+
+// Загрузка данных из файла
+function loadData() {
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+            users = new Map(data.users || []);
+            groups = new Map(data.groups || []);
+            messages = data.messages || [];
+            console.log(`📁 Загружено: ${users.size} пользователей, ${groups.size} групп, ${messages.length} сообщений`);
+        }
+    } catch (e) { console.error('Ошибка загрузки:', e); }
+}
+
+// Сохранение данных в файл
+function saveData() {
+    try {
+        const data = {
+            users: Array.from(users.entries()),
+            groups: Array.from(groups.entries()),
+            messages: messages
+        };
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        console.log(`💾 Сохранено: ${users.size} пользователей, ${groups.size} групп`);
+    } catch (e) { console.error('Ошибка сохранения:', e); }
+}
+
+// Создаём папки
 if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 if (!fs.existsSync('./public')) fs.mkdirSync('./public');
 
@@ -62,6 +92,7 @@ app.post('/upload-avatar', upload.single('avatar'), (req, res) => {
         }
         user.avatar = `/uploads/${req.file.filename}`;
         users.set(userId, user);
+        saveData();
         broadcast({ type: 'avatar_update', userId, avatar: user.avatar });
         res.json({ url: user.avatar });
     } else {
@@ -97,6 +128,7 @@ wss.on('connection', (ws) => {
                         createdAt: Date.now() 
                     };
                     users.set(currentUser, user);
+                    saveData();
                 } else {
                     user.online = true;
                 }
@@ -140,6 +172,7 @@ wss.on('connection', (ws) => {
                     timestamp: Date.now() 
                 };
                 messages.push(msg);
+                saveData();
                 const recipientWs = clients.get(data.to);
                 if (recipientWs) recipientWs.send(JSON.stringify(msg));
                 ws.send(JSON.stringify(msg));
@@ -164,6 +197,7 @@ wss.on('connection', (ws) => {
                     isGroup: true 
                 };
                 messages.push(msg);
+                saveData();
                 group.members.forEach(memberId => {
                     const memberWs = clients.get(memberId);
                     if (memberWs) memberWs.send(JSON.stringify(msg));
@@ -200,6 +234,7 @@ wss.on('connection', (ws) => {
                     password: data.password || null, 
                     createdAt: Date.now() 
                 });
+                saveData();
                 ws.send(JSON.stringify({ type: 'group_created' }));
                 broadcast({ type: 'groups_list', groups: Array.from(groups.values()) });
             }
@@ -242,6 +277,7 @@ wss.on('connection', (ws) => {
                 if (!group.members.includes(currentUser)) {
                     group.members.push(currentUser);
                     groups.set(data.groupId, group);
+                    saveData();
                     broadcast({ type: 'groups_list', groups: Array.from(groups.values()) });
                     ws.send(JSON.stringify({ type: 'group_joined', groupName: group.name }));
                 }
@@ -253,6 +289,8 @@ wss.on('connection', (ws) => {
                 if (group.password && group.password !== data.password) { ws.send(JSON.stringify({ type: 'join_error', error: 'Неверный пароль' })); return; }
                 if (!group.members.includes(currentUser)) {
                     group.members.push(currentUser);
+                    groups.set(data.groupId, group);
+                    saveData();
                     ws.send(JSON.stringify({ type: 'join_success', groupName: group.name }));
                 }
             }
@@ -262,6 +300,7 @@ wss.on('connection', (ws) => {
                 if (group && group.members && group.members.includes(currentUser)) {
                     group.members = group.members.filter(m => m !== currentUser);
                     if (group.members.length === 0) groups.delete(data.groupId);
+                    saveData();
                     ws.send(JSON.stringify({ type: 'left_group', groupId: data.groupId }));
                 }
             }
@@ -270,6 +309,7 @@ wss.on('connection', (ws) => {
                 const group = groups.get(data.groupId);
                 if (group && group.owner === currentUser) {
                     groups.delete(data.groupId);
+                    saveData();
                     broadcast({ type: 'group_deleted', groupId: data.groupId });
                 }
             }
@@ -280,6 +320,8 @@ wss.on('connection', (ws) => {
                 const user = users.get(currentUser);
                 if (!user.contacts.includes(data.contactName)) {
                     user.contacts.push(data.contactName);
+                    users.set(currentUser, user);
+                    saveData();
                     ws.send(JSON.stringify({ type: 'contact_added', contact: data.contactName }));
                     const contactWs = clients.get(data.contactName);
                     if (contactWs) contactWs.send(JSON.stringify({ type: 'contact_request', from: currentUser }));
@@ -296,6 +338,7 @@ wss.on('connection', (ws) => {
                 if (msg) {
                     if (!msg.reactions) msg.reactions = {};
                     msg.reactions[data.reaction] = (msg.reactions[data.reaction] || 0) + 1;
+                    saveData();
                     if (msg.isGroup) {
                         const group = groups.get(msg.groupId);
                         group?.members.forEach(m => {
@@ -355,9 +398,7 @@ wss.on('connection', (ws) => {
                 }
             }
             
-        } catch(e) { 
-            console.error('WebSocket error:', e); 
-        }
+        } catch(e) { console.error('WebSocket error:', e); }
     });
     
     ws.on('close', () => {
@@ -370,6 +411,12 @@ wss.on('connection', (ws) => {
         }
     });
 });
+
+// Загружаем данные при старте
+loadData();
+
+// Сохраняем данные каждые 10 секунд (на всякий случай)
+setInterval(saveData, 10000);
 
 server.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
