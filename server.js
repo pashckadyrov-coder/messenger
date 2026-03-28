@@ -145,7 +145,7 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify(msg));
             }
                 
-                else if (data.type === 'group_call_offer') {
+else if (data.type === 'group_call_offer') {
     const group = groups.get(data.groupId);
     if (!group) return;
     group.members.forEach(memberId => {
